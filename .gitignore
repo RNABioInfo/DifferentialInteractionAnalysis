@@ -6,3 +6,10 @@
 *.bedpe
 *.tsv
 *.csv
+*.html
+*.pdf
+*.png
+*.css
+*.js
+differential_interaction_analysis_cache/*
+differential_interaction_analysis_files/*
