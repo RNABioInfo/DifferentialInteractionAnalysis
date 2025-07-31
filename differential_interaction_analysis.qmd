@@ -1,0 +1,291 @@
+---
+title: "Differential Interaction Analysis"
+author: "Christopher Adelmann"
+format: html
+editor: visual
+df-print: paged
+
+knitr:
+  opts_chunk:
+    rows.print: 20
+
+project:
+  execute-dir: project
+  
+params:
+  out_dir: "."
+  analysis_method: "DESeq2" # either edgeR or DESeq2
+  metadata_file: "metadata.csv"
+  counts_file: "/Volumes/chris_ssd/projects/external/sRNA_mRNA_interactome_hyderabad/sequencing_run_2/light_to_dark/05_postprocess/complete_super_interaction_transcript_counts.gct"
+  interactions_file: "/Volumes/chris_ssd/projects/external/sRNA_mRNA_interactome_hyderabad/sequencing_run_2/light_to_dark/05_postprocess/complete_super_interaction_regions.bedpe"
+  annotations_file: "/Users/christopherphd/Downloads/Untitled/Syn_final_modified.gff"
+  min_inter_contr: 10
+  min_n_samples_contr: 2
+  min_n_samples_greater_zero: 3
+  feature_ids: "ncr0700,psrR1,csiR1,gene856,gene857,gene2199,gene2962"
+  padj_thresh: 0.1
+---
+
+```{r}
+#| include: false
+
+source_code_files = list.files("code", full.names = TRUE)
+sapply(source_code_files, source)
+```
+
+# Input Parameters
+
+```{r}
+#| echo: false
+print(str_glue("min_inter_contr: {params$out_dir}"))
+print(str_glue("min_inter_contr: {params$min_inter_contr}"))
+print(str_glue("min_n_samples_contr: {params$min_n_samples_contr}"))
+print(str_glue("min_n_samples_greater_zero: {params$min_n_samples_greater_zero}"))
+print(str_glue("feature_ids: {params$feature_ids}"))
+print(str_glue("padj_thresh: {params$padj_thresh}"))
+```
+
+# Input Parsing
+
+## Parse Metadata, Counts and Setup Analysis
+
+Input metadata. This determines which subset of samples and conditions will be compared.
+
+Input counts. This document contains all count data for the analysis and is filtered by the metadata.
+
+```{r}
+#| echo: false
+
+analysis = make_analysis(params)
+```
+
+# Differential Interaction Analysis
+
+## Filtering Counts
+
+```{r}
+#| echo: false
+
+analysis = get_filtered_dataset(analysis)
+```
+
+## Running Analysis
+
+```{r}
+#| echo: false
+
+analysis = run_analysis(analysis)
+```
+
+## Quality Control
+
+### Input Data and Count Normalization
+
+```{r}
+#| echo: false
+
+plot_read_counts(analysis)
+
+plot_sparsity(analysis)
+
+plot_disp_ests(analysis)
+```
+
+### Density of Ratios between Condition
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 6
+
+
+degCheckFactors(analysis$norm_counts)
+```
+
+### QC Overview and Standard deviation vs. min median of genes
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 6
+
+plot_deg_qc(analysis)
+plot_ma(analysis)
+```
+
+## Results
+
+### Top 20 Counts
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 7
+
+plot_deg(analysis)
+```
+
+### LFC Shrunken Results
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 6
+summary(analysis)
+
+plot_volcano(analysis)
+```
+
+### Sorted Significant Interaction Regions
+
+```{r}
+#| include: false
+annotation_gff = read_delim(params$annotations_file, delim = "\t", escape_double = FALSE, trim_ws = TRUE, skip = 7, col_names = FALSE)
+
+interactions_bed = read_delim(params$interactions_file, delim = "\t", escape_double = FALSE, trim_ws = TRUE, skip = 2, col_names = FALSE)
+
+interactions_bed = as.data.frame(interactions_bed)
+rownames(interactions_bed) = interactions_bed$X7
+```
+
+```{r}
+#| echo: false
+sig_results_df = sig_results(analysis)
+sig_results_df
+
+found_sig_res = TRUE
+
+if (nrow(sig_results_df) < 1) {
+  print("Did not find significant results. Stopping further analysis.")
+  
+  found_sig_res = FALSE
+}
+
+if (found_sig_res) {
+  analysis = set_sig_interactions(analysis, interactions_bed)
+
+  condition_levels = analysis$metadata_df$condition
+  
+  result_path = str_glue("{params$out_dir}/condition_{condition_levels[1]}_vs_{condition_levels[2]}_padj{params$padj_thresh}_sig_results.tsv")
+
+  write.table(sig_results_df, result_path, na = "NA", append = TRUE, col.names = TRUE, row.names = TRUE, sep = "\t", quote = TRUE)
+}
+```
+
+```{r}
+#| eval: !expr 'found_sig_res'
+#| echo: false
+#| fig-width: 8
+#| fig-height: 8
+
+
+
+sample_bound = 30
+z_score_counts = select_ordered_norm_counts(analysis, n = sample_bound)
+padj = select_ordered_padj(analysis, n = sample_bound)
+sample_bound = min(sample_bound, nrow(z_score_counts))
+
+pheatmap(z_score_counts, cluster_rows=TRUE, show_rownames=TRUE,
+         cluster_cols=FALSE, annotation_col=analysis$metadata_df, annotation_row = padj, main = str_glue("Top {sample_bound} Variance Stabilized\nZ-Scored Counts of Sig. Interactions"))
+
+```
+
+### Significant Interactions of Interest within Results
+
+```{r}
+#| eval: !expr found_sig_res
+#| echo: false
+#| results: asis
+#| fig-show: asis
+
+
+feature_id_list = unlist(strsplit(params$feature_ids, ","))
+
+for (feature_id_str in feature_id_list) {
+  cat(str_glue("#### Target interaction {feature_id_str}\n\n"))
+  
+  # 1) subset the BED df, check rows
+  target_rows = interactions_bed[
+    grepl(feature_id_str, interactions_bed$X12) |
+    grepl(feature_id_str, interactions_bed$X13),
+  ]
+  
+  if (nrow(target_rows) < 1) {
+    cat("*No interactions found*\n\n")
+    next
+  }
+  
+  # 2) pull out the interaction IDs
+  target_interactions = target_rows$X7
+  
+  # 3) subset your normalized‐counts matrix, check rows
+  target_norm_counts = analysis$norm_counts[rownames(analysis$norm_counts) %in% target_interactions, , drop = FALSE]
+  if (nrow(target_norm_counts) < 1) {
+    cat("*No normalized counts found for those interactions*\n\n")
+    next
+  }
+  
+  # 4) order by average abundance
+  target_norm_counts = target_norm_counts[
+    order(rowMeans(target_norm_counts), decreasing = TRUE),
+  , drop = FALSE]
+  
+  # 5) print tables if you need to inspect them
+  target_norm_counts
+  target_rows[target_rows$X7 %in% rownames(target_norm_counts), ]
+  
+  p = pheatmap(
+    target_norm_counts,
+    cluster_rows    = FALSE,
+    cluster_cols    = FALSE,
+    show_rownames   = TRUE,
+    annotation_col  = analysis$metadata_df,
+    main            = str_glue("Log counts of sig. interactions of {feature_id_str}")
+  )
+  print(p)
+  
+  cat("\n\n")
+}
+
+```
+
+### Annotated Results
+
+```{r}
+#| echo: false
+#| eval: !expr found_sig_res
+
+annotated_sig_interactions = annotate_sig_interactions(analysis, annotation_gff)
+
+
+annotated_sig_interactions
+
+result_path = str_glue("{params$out_dir}/condition_{condition_levels[1]}_vs_{condition_levels[2]}_padj{params$padj_thresh}_sig_results_annotated.bedpe")
+
+write.table(annotated_sig_interactions, result_path, na = "NA", append = TRUE, col.names = TRUE, row.names = FALSE, sep = "\t", quote = TRUE)
+
+# Export to bed file
+```
+
+### Interaction Count by unambiguous Bio-Type
+
+```{r}
+#| echo: false
+#| eval: !expr found_sig_res
+
+unambiguous_results = prepare_unambiguous_results(annotated_sig_interactions)
+
+# intra- (same-gene) interactions
+intra_mat = get_biotype_matrix(unambiguous_results, "intra")
+plot_biotype_heatmap(
+  intra_mat,
+  "Cross-tabulation of Intramolecular Interaction\nBiotype 1 vs Biotype 2"
+)
+
+# inter- (different-gene) interactions
+inter_mat = get_biotype_matrix(unambiguous_results, "inter")
+plot_biotype_heatmap(
+  inter_mat,
+  "Cross-tabulation of Intermolecular Interaction\nBiotype 1 vs Biotype 2"
+)
+```
