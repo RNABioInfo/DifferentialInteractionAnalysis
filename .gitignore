@@ -13,3 +13,5 @@
 *.js
 differential_interaction_analysis_cache/*
 differential_interaction_analysis_files/*
+.jupyter_cache/*
+_extensions/*
