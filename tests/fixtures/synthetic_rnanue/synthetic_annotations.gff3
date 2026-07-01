@@ -1,0 +1,8 @@
+##gff-version 3
+chr1	test	TU	90	560	.	+	.	ID=TU_broad;Name=TU_broad
+chr1	test	gene	101	150	.	+	.	ID=geneA;Name=Gene A;gene=geneA;locus_tag=ltA;Alias=targetA;gene_biotype=protein_coding;gbkey=Gene
+chr1	test	sRNA	501	550	.	-	.	ID=geneB;Name=Gene B sRNA;gene=geneB;gbkey=sRNA
+chr1	test	tRNA	601	650	.	-	.	ID=geneC;Name=Gene C tRNA;gene=geneC;gbkey=tRNA
+chr1	test	gene	701	750	.	-	.	ID=geneE;Name=Gene E;gene=geneE;gene_biotype=protein_coding;gbkey=Gene
+chr1.1	test	tRNA	901	950	.	+	.	ID=geneF;Name=Gene F tRNA;gene=geneF;gbkey=tRNA
+chr1	test	gene	1001	1050	.	-	.	ID=geneOpp;Name=Opposite Strand rRNA;gene=geneOpp;gene_biotype=rRNA;gbkey=Gene

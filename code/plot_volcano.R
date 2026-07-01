@@ -1,39 +1,23 @@
-plot_volcano = function(obj, x, y, title) {
-  UseMethod("plot_volcano")
-}
-
-plot_volcano.EdgeRAnalysis = function(obj) {
-  sample_count = summary(obj$metadata_df$condition)
-  condition_levels = names(sample_count)
-  
-  title = str_glue("{condition_levels[1]} vs {condition_levels[2]}")
-  sample_string = sample_replicate_str(obj)
-  
-  print(
-    EnhancedVolcano(obj$results,
-                    lab = rownames(obj$results),
-                    x = 'logFC',
-                    y = 'FDR',
-                    title = title,
-                    subtitle = sample_string,
-                    pCutoff = obj$params$padj_thresh)
+plot_method_volcano <- function(analysis, method) {
+  res <- analysis$method_results[[method]]$annotated_results
+  high_confidence_ids <- if (!is.null(analysis$high_confidence_results)) {
+    analysis$high_confidence_results$interaction_id
+  } else {
+    character()
+  }
+  res$plot_class <- dplyr::case_when(
+    res$interaction_id %in% high_confidence_ids ~ "high confidence",
+    res$significant ~ "significant",
+    TRUE ~ "not significant"
   )
-}
-
-plot_volcano.DESeq2Analysis = function(obj) {
-  sample_count = summary(obj$metadata_df$condition)
-  condition_levels = names(sample_count)
-  
-  title = str_glue("{condition_levels[1]} vs {condition_levels[2]}")
-  sample_string = sample_replicate_str(obj)
-  
-  print(
-    EnhancedVolcano(obj$results,
-                    lab = rownames(obj$results),
-                    x = 'log2FoldChange',
-                    y = 'padj',
-                    title = title,
-                    subtitle = sample_string,
-                    pCutoff = obj$params$padj_thresh)
-  )
+  res$neg_log10_padj <- -log10(pmax(res$padj, .Machine$double.xmin))
+  ggplot2::ggplot(res, ggplot2::aes(x = log2FoldChange, y = neg_log10_padj, color = plot_class)) +
+    ggplot2::geom_point(alpha = 0.45, size = 1.2) +
+    ggplot2::scale_color_manual(values = c(
+      "high confidence" = "#C43B3B",
+      "significant" = "#326C9C",
+      "not significant" = "grey70"
+    )) +
+    ggplot2::theme_light() +
+    ggplot2::labs(x = "log2 fold-change", y = "-log10(FDR)", color = NULL, title = paste(method, "volcano plot"))
 }

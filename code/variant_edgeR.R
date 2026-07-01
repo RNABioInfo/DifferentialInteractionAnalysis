@@ -1,37 +1,51 @@
-EdgeRAnalysis <- function(params, metadata_df) {
-  structure(
-    .Data = list (
-      params = AnalysisParameters(params),
-      metadata_df = metadata_df,
-      edgeR_dataset = NULL,
-      edgeR_fit = NULL,
-      edgeR_results = NULL,
-      results = NULL,
-      norm_counts = NULL,
-      sig_interaction_bed = NULL
-    ),
-    class = "EdgeRAnalysis"
+run_method_edgeR <- function(analysis) {
+  counts <- as.matrix(analysis$counts_model)
+  storage.mode(counts) <- "numeric"
+
+  dge <- edgeR::DGEList(counts = counts, group = analysis$model_metadata$contrast_group)
+  keep_custom <- custom_count_filter(dge$counts, analysis$params)
+  keep_expr <- tryCatch(
+    edgeR::filterByExpr(dge, design = analysis$design),
+    error = function(e) {
+      warning("edgeR::filterByExpr failed; using only custom count filters: ", e$message, call. = FALSE)
+      rep(TRUE, nrow(dge))
+    }
+  )
+  keep <- keep_custom & keep_expr
+  if (!any(keep)) {
+    stop("edgeR filtering removed all interactions.", call. = FALSE)
+  }
+
+  dge <- dge[keep, , keep.lib.sizes = FALSE]
+  dge <- edgeR::calcNormFactors(dge, method = "TMM")
+  edgeR_offset <- analysis$log_offset[rownames(dge$counts), colnames(dge$counts), drop = FALSE]
+  edgeR_offset <- edgeR_offset +
+    matrix(log(dge$samples$norm.factors), nrow = nrow(edgeR_offset), ncol = ncol(edgeR_offset), byrow = TRUE)
+  dge$offset <- edgeR_offset
+
+  dge <- edgeR::estimateDisp(dge, analysis$design, robust = TRUE)
+  fit <- edgeR::glmQLFit(dge, analysis$design, robust = TRUE)
+  qlf <- edgeR::glmQLFTest(fit, coef = analysis$contrast_coef)
+
+  results <- as.data.frame(qlf$table, stringsAsFactors = FALSE)
+  results$interaction_id <- rownames(results)
+  results$FDR <- stats::p.adjust(results$PValue, method = "BH")
+  results$method <- "edgeR"
+  results$log2FoldChange <- results$logFC
+  results$pvalue <- results$PValue
+  results$padj <- results$FDR
+  results <- results[order(results$padj, results$pvalue), , drop = FALSE]
+
+  list(
+    method = "edgeR",
+    counts = dge$counts,
+    normalized_counts = offset_normalized_counts(dge$counts, edgeR_offset),
+    filter_keep = keep,
+    design = analysis$design,
+    dataset = dge,
+    fit = fit,
+    test = qlf,
+    results = results,
+    rounding = NULL
   )
 }
-
-
-get_filtered_dataset.EdgeRAnalysis <- function(obj) {
-  counts_df = read_counts(obj)
-  
-  print(summary(counts_df))
-  
-  dge_list = DGEList(counts = counts_df, group = obj$metadata_df$condition)
-  
-  keep_min_count = rowSums(dge_list$counts >= obj$params$min_inter_contr) >= obj$params$min_n_samples_inter_contr
-  
-  keep_larger_zero = rowSums(dge_list$counts > 0) >= obj$params$min_n_samples_greater_zero
-  
-  combined_keep = keep_min_count & keep_larger_zero
-  
-  print("Number of removed and kept interactions")
-  print(summary(combined_keep))
-  
-  obj$edgeR_dataset = dge_list[combined_keep,]
-  
-  return(obj)
-  }

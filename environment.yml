@@ -1,0 +1,22 @@
+name: differential-interaction-analysis
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - quarto
+  - r-base=4.4
+  - r-knitr
+  - r-rmarkdown
+  - r-yaml
+  - r-glue
+  - r-readr
+  - r-dplyr
+  - r-ggplot2
+  - r-scales
+  - bioconductor-deseq2
+  - bioconductor-edger
+  - bioconductor-apeglm
+  - bioconductor-genomicranges
+  - bioconductor-rtracklayer
+  - bioconductor-complexheatmap
+  - r-circlize

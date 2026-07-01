@@ -1,0 +1,7 @@
+project:
+  type: default
+  render:
+    - differential_interaction_analysis.qmd
+
+execute:
+  freeze: false

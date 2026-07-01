@@ -15,3 +15,12 @@ differential_interaction_analysis_cache/*
 differential_interaction_analysis_files/*
 .jupyter_cache/*
 _extensions/*
+results/*
+!results/.gitkeep
+params.local.yml
+.Rprofile
+renv/
+renv.lock
+
+/.quarto/
+**/*.quarto_ipynb

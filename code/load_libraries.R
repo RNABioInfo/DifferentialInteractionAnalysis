@@ -1,39 +1,60 @@
-# Load and install all libraries
+# Load all libraries required by the report.
+#
+# Package installation is intentionally kept out of render/preview. Install the
+# conda environment from environment.yml, then render the document from that
+# environment. This keeps Quarto from silently compiling packages during setup.
+message("Loading libraries")
 
-if (!require("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
+attached_packages <- c(
+  "DESeq2",
+  "edgeR",
+  "readr",
+  "dplyr",
+  "knitr",
+  "ggplot2",
+  "grid"
+)
 
-BiocManager::install("DESeq2", ask = FALSE, quiet = TRUE)
-BiocManager::install("edgeR", ask = FALSE, quiet = TRUE)
-BiocManager::install("apeglm", ask = FALSE, quiet = TRUE)
-BiocManager::install('EnhancedVolcano', ask = FALSE, quiet = TRUE)
-BiocManager::install("pasilla", ask = FALSE, quiet = TRUE)
-BiocManager::install("DEGreport", ask = FALSE, quiet = TRUE)
+namespace_packages <- c(
+  attached_packages,
+  "apeglm",
+  "circlize",
+  "ComplexHeatmap",
+  "GenomicRanges",
+  "IRanges",
+  "limma",
+  "S4Vectors",
+  "scales"
+)
 
-if (!require("factoextra", quietly = TRUE))
-  install.packages("factoextra")
+optional_namespace_packages <- c("rtracklayer")
 
-if (!require("purrr", quietly = TRUE))
-  install.packages("purrr")
+missing_packages <- namespace_packages[
+  !vapply(namespace_packages, requireNamespace, logical(1), quietly = TRUE)
+]
 
-if (!require("pheatmap", quietly = TRUE))
-  install.packages("pheatmap")
+if (length(missing_packages) > 0) {
+  stop(
+    paste0(
+      "Missing required R packages: ",
+      paste(missing_packages, collapse = ", "),
+      ".\nCreate/update the conda environment first:\n",
+      "  conda env update -f environment.yml --prune\n",
+      "  conda activate differential-interaction-analysis"
+    ),
+    call. = FALSE
+  )
+}
 
-if (!require("tidyverse", quietly = TRUE))
-  install.packages("tidyverse")
+invisible(lapply(attached_packages, library, character.only = TRUE))
 
-library(DESeq2)
-library(edgeR)
-library(readr)
-library(factoextra)
-library(purrr)
-library(dplyr)
-library(EnhancedVolcano)
-library(pheatmap)
-library(RColorBrewer)
-library(styler)
-library(knitr)
-library(DEGreport)
-library(ggplot2)
-library(genefilter)
-library(grid)
+missing_optional_packages <- optional_namespace_packages[
+  !vapply(optional_namespace_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_optional_packages) > 0) {
+  message(
+    "Optional R packages not available: ",
+    paste(missing_optional_packages, collapse = ", "),
+    ". GFF annotation will use the built-in parser fallback where possible."
+  )
+}

@@ -1,7 +1,14 @@
-summary.DESeq2Analysis = function(obj) {
-  summary(obj$deseq_results)
-}
-
-summary.EdgeRAnalysis = function(obj) {
-  summary(decideTests(obj$edgeR_results, p.value = obj$params$padj_thresh))
+summary.InteractionAnalysis <- function(object, ...) {
+  method_counts <- data.frame(
+    method = names(object$method_results),
+    tested_interactions = vapply(object$method_results, function(x) nrow(x$annotated_results), integer(1)),
+    significant_interactions = vapply(
+      object$method_results,
+      function(x) sum(x$annotated_results$significant, na.rm = TRUE),
+      integer(1)
+    ),
+    stringsAsFactors = FALSE
+  )
+  print(method_counts)
+  invisible(method_counts)
 }

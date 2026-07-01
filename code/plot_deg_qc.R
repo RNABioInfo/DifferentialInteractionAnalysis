@@ -1,17 +1,17 @@
-plot_deg_qc = function(obj, ...) {
-  UseMethod("plot_deg_qc")
+plot_concordance <- function(analysis) {
+  if (is.null(analysis$concordance)) {
+    plot.new()
+    title("Method concordance unavailable")
+    text(0.5, 0.5, "Run analysis_method: both to compute concordance")
+    return(invisible(NULL))
+  }
+  ggplot2::ggplot(
+    analysis$concordance,
+    ggplot2::aes(x = edgeR_log2FoldChange, y = DESeq2_log2FoldChange, color = concordance_class)
+  ) +
+    ggplot2::geom_point(alpha = 0.5, size = 1.35) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::geom_vline(xintercept = 0, linetype = "dashed") +
+    ggplot2::theme_light() +
+    ggplot2::labs(x = "edgeR log2 fold-change", y = "DESeq2 log2 fold-change", title = "Method concordance")
 }
-
-plot_deg_qc.EdgeRAnalysis = function(obj) {
-  sorted_norm_counts = obj$norm_counts[rownames(obj$results), ]
-  
-  print(degQC(sorted_norm_counts, obj$metadata_df$condition, pvalue = obj$results$PValue))
-  
-  print(degMV(counts = sorted_norm_counts, group = obj$metadata_df$condition, pvalues = obj$results$PValue))
-}
-
-plot_deg_qc.DESeq2Analysis = function(obj) {
-  degQC(obj$norm_counts, obj$metadata_df$condition, pvalue = obj$results$pvalue)
-}
-
-#plotMD(analysis$edgeR_results)

@@ -1,7 +1,9 @@
 ---
-title: "Differential Interaction Analysis"
+title: "Differential RNA-RNA Interaction Enrichment Analysis"
 author: "Christopher Adelmann"
-format: html
+format:
+  html:
+    embed-resources: true
 editor: visual
 df-print: paged
 
@@ -11,14 +13,88 @@ knitr:
 
 project:
   execute-dir: project
-  
+
 params:
-  out_dir: "."
-  analysis_method: "DESeq2" # either edgeR or DESeq2
-  metadata_file: "metadata.csv"
-  counts_file: "/Volumes/chris_ssd/projects/external/sRNA_mRNA_interactome_hyderabad/sequencing_run_2/light_to_dark/05_postprocess/complete_super_interaction_transcript_counts.gct"
-  interactions_file: "/Volumes/chris_ssd/projects/external/sRNA_mRNA_interactome_hyderabad/sequencing_run_2/light_to_dark/05_postprocess/complete_super_interaction_regions.bedpe"
-  annotations_file: "/Users/christopherphd/Downloads/Untitled/Syn_final_modified.gff"
+  out_dir: "results"
+  analysis_method: "both"
+  metadata_file: "data/metadata.csv"
+  counts_file: "data/complete_super_interaction_transcript_counts.gct"
+  interactions_file: "data/complete_super_interaction_regions.bedpe"
+  annotations_file: "/Users/christopherphd/Downloads/Syn_final_modified.gff"
+  rnanue_results_dir: "/Volumes/chris_ssd_2/external/hyderabad_synechocystis/results_dark"
+  primary_contrast:
+    value:
+      case_role: "treatment"
+      control_role: "ligation_control"
+  qc_roles:
+    value:
+      - "no_ligation_control"
+  normalization:
+    value:
+      sample_exposure: "split_reads"
+      pair_background: true
+      offset_pseudocount: 0.5
+  count_handling:
+    value:
+      edgeR: "numeric"
+      DESeq2: "round"
+  high_confidence:
+    value:
+      rnanue_padj_max: 0.1
+      max_no_ligation_count: 0
+      min_pair_background_available_fraction: 1
+      excluded_only_coverage_profiles:
+        - "broad_diffuse"
+  annotation:
+    value:
+      enabled: true
+      gff_file: "/Users/christopherphd/Downloads/Syn_final_modified.gff"
+      feature_types:
+        - "gene"
+        - "sRNA"
+        - "tRNA"
+        - "rRNA"
+        - "ncRNA"
+        - "transcript"
+        - "TU"
+        - "CDS"
+        - "mobile_genetic_element"
+      ignore_feature_types:
+        - "region"
+        - "sequence_feature"
+      match_attributes:
+        - "ID"
+        - "Name"
+        - "gene"
+        - "locus_tag"
+        - "Alias"
+        - "Parent"
+      biotype_attributes:
+        - "gene_biotype"
+        - "biotype"
+        - "gbkey"
+        - "type"
+      seqname_normalization: "auto_strip_version"
+      strand_policy: "both"
+      min_overlap_bp: 1
+      target_ids:
+        - "ncr0700"
+        - "psrR1"
+        - "csiR1"
+        - "gene856"
+        - "gene857"
+      target_result_sets:
+        - "high_confidence"
+        - "concordant_same_direction"
+        - "edgeR_significant"
+        - "DESeq2_significant"
+  batch_correction:
+    value:
+      mode: "auto"
+      columns:
+        - "batch"
+      on_confounded: "fail"
+      visualization_remove_batch: true
   min_inter_contr: 10
   min_n_samples_contr: 2
   min_n_samples_greater_zero: 3
@@ -28,264 +104,419 @@ params:
 
 ```{r}
 #| include: false
-
-source_code_files = list.files("code", full.names = TRUE)
-sapply(source_code_files, source)
+source("code/load_libraries.R")
+source_code_files <- setdiff(
+  list.files("code", pattern = "\\.R$", full.names = TRUE),
+  c("code/load_libraries.R", "code/check_environment.R")
+)
+invisible(lapply(source_code_files, source))
 ```
 
-# Input Parameters
+# Analysis Overview
+
+This report tests whether RNAnue interaction counts are enriched in treatment samples relative to ligation controls. No-ligation samples are QC-only and are excluded from the primary model.
 
 ```{r}
 #| echo: false
-print(str_glue("min_inter_contr: {params$out_dir}"))
-print(str_glue("min_inter_contr: {params$min_inter_contr}"))
-print(str_glue("min_n_samples_contr: {params$min_n_samples_contr}"))
-print(str_glue("min_n_samples_greater_zero: {params$min_n_samples_greater_zero}"))
-print(str_glue("feature_ids: {params$feature_ids}"))
-print(str_glue("padj_thresh: {params$padj_thresh}"))
+analysis <- make_analysis(params)
+analysis <- run_analysis(analysis)
 ```
 
-# Input Parsing
+Model-fitting and post-processing warnings are written to `analysis_warnings.tsv` under `out_dir`.
 
-## Parse Metadata, Counts and Setup Analysis
-
-Input metadata. This determines which subset of samples and conditions will be compared.
-
-Input counts. This document contains all count data for the analysis and is filtered by the metadata.
+Resolved inputs, contrast, model, filtering, and normalization settings:
 
 ```{r}
 #| echo: false
-
-analysis = make_analysis(params)
+knitr::kable(data.frame(
+  parameter = c(
+    "analysis_method",
+    "primary contrast",
+    "detect_dir",
+    "analyze_dir",
+    "padj_threshold",
+    "design_formula",
+    "batch_status",
+    "batch_columns_used",
+    "count filter",
+    "sample exposure",
+    "pair background offset"
+  ),
+  value = c(
+    analysis$params$analysis_method,
+    paste0(analysis$params$case_role, " vs ", analysis$params$control_role),
+    analysis$params$detect_dir,
+    analysis$params$analyze_dir,
+    analysis$params$padj_threshold,
+    paste(deparse(analysis$design_formula), collapse = ""),
+    analysis$design_diagnostics$batch_status[1],
+    analysis$design_diagnostics$used_batch_columns[1],
+    paste0(
+      "count >= ", analysis$params$min_inter_contr,
+      " in >= ", analysis$params$min_n_samples_inter_contr,
+      " samples and >0 in >= ", analysis$params$min_n_samples_greater_zero,
+      " samples"
+    ),
+    analysis$params$sample_exposure,
+    analysis$params$pair_background
+  )
+))
 ```
 
-# Differential Interaction Analysis
+# Sample Roles And Model Design
 
-## Filtering Counts
+Sample metadata. Treatment and ligation-control samples enter the model; no-ligation samples are QC-only.
 
 ```{r}
 #| echo: false
-
-analysis = get_filtered_dataset(analysis)
+knitr::kable(analysis$metadata)
 ```
 
-## Running Analysis
+Usable batch columns are added as fixed effects. Confounded batch columns stop the render before model fitting.
+
+Design diagnostics: formula, batch handling, matrix rank, and tested coefficient.
 
 ```{r}
 #| echo: false
-
-analysis = run_analysis(analysis)
+knitr::kable(analysis$design_diagnostics)
 ```
 
-## Quality Control
-
-### Input Data and Count Normalization
+Batch balance by sample, role, condition, and batch value.
 
 ```{r}
 #| echo: false
-
-plot_read_counts(analysis)
-
-plot_sparsity(analysis)
-
-plot_disp_ests(analysis)
+if (nrow(analysis$batch_balance) > 0) {
+  knitr::kable(analysis$batch_balance)
+} else {
+  cat("No usable or requested batch columns were present in model metadata.")
+}
 ```
 
-### Density of Ratios between Condition
+# Sample-Level Quality Control
+
+QC plots show read depth, interaction library size, interaction yield, and split-read fraction by sample role. `mapped_read_count` uses RNAnue `mapped_reads` when available, otherwise `splits + singletons`; `interaction_library_sum` is the per-sample sum of the interaction-count matrix.
+
+```{r}
+#| echo: false
+sample_qc_plot_list <- sample_qc_plots(analysis)
+```
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(sample_qc_plot_list$mapped_read_count)
+```
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(sample_qc_plot_list$interaction_library_size)
+```
 
 ```{r}
 #| echo: false
 #| fig-width: 8
 #| fig-height: 6
-
-
-degCheckFactors(analysis$norm_counts)
+print(sample_qc_plot_list$mapped_vs_interaction_sum)
 ```
-
-### QC Overview and Standard deviation vs. min median of genes
 
 ```{r}
 #| echo: false
 #| fig-width: 8
-#| fig-height: 6
-
-plot_deg_qc(analysis)
-plot_ma(analysis)
+#| fig-height: 5
+print(sample_qc_plot_list$split_fraction)
 ```
 
-## Results
+No-ligation QC output: `no_ligation_qc.tsv`.
 
-### Top 20 Counts
+# Count Matrix And Normalization
+
+Zero-count fraction per sample, ordered by role. High sparsity can reduce power and affect dispersion estimates.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(plot_sparsity_overview(analysis))
+```
+
+PCA of all filtered model interactions after log2 offset normalization.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(plot_pca_assessment(analysis, "all_model_filtered"))
+```
+
+Pairwise Spearman correlations on log2 offset-normalized counts, ordered by role.
+
+```{r}
+#| echo: false
+#| fig-width: 7
+#| fig-height: 6
+print(plot_sample_correlation_heatmap(analysis))
+```
+
+Pair background is available when both interaction arms map to transcript-count features in a model sample. A fraction of `1` means all model samples used the pair-background offset for that interaction.
+
+The plots summarize pair-background availability and final log-offset variation.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+plot_offset_diagnostics(analysis)
+```
+
+Normalization diagnostics output: `normalization_diagnostics.tsv`.
+
+# Differential Enrichment
+
+Top annotated interactions for each DIA method. p-values and FDR come from the method-specific negative-binomial model; RNAnue and QC fields are included for context.
+
+```{r}
+#| echo: false
+for (method in names(analysis$method_results)) {
+  cat("## ", method, "\n\n", sep = "")
+  method_result <- analysis$method_results[[method]]
+  result_table <- method_result$annotated_results
+  cat(
+    "Significant interactions at FDR <= ",
+    analysis$params$padj_threshold,
+    ": ",
+    sum(result_table$significant, na.rm = TRUE),
+    "\n\n",
+    sep = ""
+  )
+  print(knitr::kable(head(result_table, 20)))
+}
+```
+
+MA plots show effect size versus abundance. Volcano plots show effect size versus FDR evidence. Highlighted points are the high-confidence tier.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+for (method in names(analysis$method_results)) {
+  print(plot_method_ma(analysis, method))
+  print(plot_method_volcano(analysis, method))
+}
+```
+
+# DIA Method Agreement
+
+Counts of edgeR/DESeq2 agreement classes. Concordant same-direction calls are stronger candidates, but still only enrichment evidence.
+
+```{r}
+#| echo: false
+if (!is.null(analysis$concordance)) {
+  knitr::kable(table(analysis$concordance$concordance_class))
+} else {
+  cat("Method concordance requires analysis_method: both.")
+}
+```
+
+edgeR versus DESeq2 log2 fold changes for the same interactions.
+
+```{r}
+#| echo: false
+#| fig-width: 7
+#| fig-height: 6
+print(plot_concordance(analysis))
+```
+
+Top agreement records with both methods' statistics, result class, and RNAnue sample-level padj entries when available.
+
+```{r}
+#| echo: false
+if (!is.null(analysis$concordance)) {
+  knitr::kable(head(analysis$concordance, 30))
+}
+```
+
+# High-Confidence Candidates
+
+High-confidence candidates pass all configured gates: edgeR, DESeq2, RNAnue support, no-ligation QC, pair-background availability, and coverage-profile filters.
+
+Candidate outputs include a full TSV, paired BEDPE, and region-level BED.
+
+Evidence ledger for the high-confidence tier.
+
+```{r}
+#| echo: false
+high_confidence <- analysis$high_confidence_results
+cat(
+  "High-confidence interactions: ",
+  nrow(high_confidence),
+  "\n\n",
+  sep = ""
+)
+if (nrow(high_confidence) > 0) {
+  knitr::kable(head(high_confidence, 30))
+} else {
+  cat("No interactions passed all high-confidence gates.")
+}
+```
+
+# Result Stability
+
+Significant-result PCAs are exploratory QC. They are selection-biased because features come from the same differential test.
+
+PCA diagnostics: computed and skipped feature sets.
+
+```{r}
+#| echo: false
+knitr::kable(analysis$postprocess$pca_diagnostics)
+```
+
+PCA panels for significant, concordant, and high-confidence feature subsets.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+for (pca_set in setdiff(names(analysis$postprocess$pca_scores), "all_model_filtered")) {
+  print(plot_pca_assessment(analysis, pca_set))
+}
+```
+
+# Significant Interaction Heatmaps
+
+Row-scaled log2 offset-normalized counts for significant interaction sets.
+
+Column annotations follow sample role; row annotations show result class and high-confidence status.
 
 ```{r}
 #| echo: false
 #| fig-width: 9
-#| fig-height: 7
-
-plot_deg(analysis)
+#| fig-height: 8
+for (heatmap_set in c("edgeR_significant", "DESeq2_significant", "concordant_same_direction", "high_confidence")) {
+  draw_significant_complex_heatmap(analysis, heatmap_set, top_n = 80)
+}
 ```
 
-### LFC Shrunken Results
+# Normalized Count Profiles
+
+Normalized counts for top called interactions. Points are samples; the black crossbar is the group median.
+
+Source data output: `significant_normalized_counts.tsv`.
+
+Large within-role spread or single-sample dominance should reduce confidence.
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 8
+for (count_set in c("edgeR_significant", "DESeq2_significant", "concordant_same_direction", "high_confidence")) {
+  print(plot_significant_normalized_counts(analysis, count_set, top_n = 20))
+}
+```
+
+Candidate stability by interaction: group means, CVs, prevalence, dominance, treatment-control separation, and no-ligation burden.
+
+```{r}
+#| echo: false
+knitr::kable(head(analysis$postprocess$candidate_stability, 30))
+```
+
+RNAnue metric summary by result class.
+
+```{r}
+#| echo: false
+knitr::kable(analysis$postprocess$rnanue_metric_group_summary)
+```
+
+# RNAnue Support Agreement
+
+Primary DIA FDR versus RNAnue treatment-sample support. Rows without finite DIA adjusted p-values are excluded; rows without RNAnue padj remain in the source table.
+
+RNAnue support is summarized from each treatment sample's minimum native padj. Outputs: `dia_rnanue_padj_comparison.tsv` and `dia_rnanue_discordance.tsv`.
+
+The density scatter shows global agreement and highlights non-background result classes.
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 6
+print(plot_dia_rnanue_padj_comparison(analysis))
+```
+
+Discordance classes separate shared, DIA-only, RNAnue-only, and unsupported evidence.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(plot_dia_rnanue_discordance(analysis))
+```
+
+# Partner Recurrence
+
+Partner-recurrence output: `partner_recurrence.tsv`. Recurrent partners can reflect hubs, abundance, annotation ambiguity, or repeated local clusters.
+
+Top recurrent partners and their high-confidence counts.
+
+```{r}
+#| echo: false
+#| fig-width: 8
+#| fig-height: 5
+print(plot_partner_recurrence(analysis))
+```
+
+# Genomic Partner Annotation
+
+Significant interaction arms are annotated against the configured GFF by coordinate overlap. Partner class comes from the selected GFF-overlap feature, not from RNAnue feature IDs.
+
+Annotation diagnostics: run status, annotated arms, unresolved arms, and seqname normalization.
+
+```{r}
+#| echo: false
+knitr::kable(analysis$postprocess$gff_annotation$diagnostics)
+```
+
+Arm annotation output: `interaction_arm_gff_annotations.tsv`.
+
+Partner-type matrices count called interactions by unordered partner-class pair.
 
 ```{r}
 #| echo: false
 #| fig-width: 8
 #| fig-height: 6
-summary(analysis)
-
-plot_volcano(analysis)
-```
-
-### Sorted Significant Interaction Regions
-
-```{r}
-#| include: false
-annotation_gff = read_delim(params$annotations_file, delim = "\t", escape_double = FALSE, trim_ws = TRUE, skip = 7, col_names = FALSE)
-
-interactions_bed = read_delim(params$interactions_file, delim = "\t", escape_double = FALSE, trim_ws = TRUE, skip = 2, col_names = FALSE)
-
-interactions_bed = as.data.frame(interactions_bed)
-rownames(interactions_bed) = interactions_bed$X7
-```
-
-```{r}
-#| echo: false
-sig_results_df = sig_results(analysis)
-sig_results_df
-
-found_sig_res = TRUE
-
-if (nrow(sig_results_df) < 1) {
-  print("Did not find significant results. Stopping further analysis.")
-  
-  found_sig_res = FALSE
-}
-
-if (found_sig_res) {
-  analysis = set_sig_interactions(analysis, interactions_bed)
-
-  condition_levels = analysis$metadata_df$condition
-  
-  result_path = str_glue("{params$out_dir}/condition_{condition_levels[1]}_vs_{condition_levels[2]}_padj{params$padj_thresh}_sig_results.tsv")
-
-  write.table(sig_results_df, result_path, na = "NA", append = TRUE, col.names = TRUE, row.names = TRUE, sep = "\t", quote = TRUE)
+for (result_set in c("high_confidence", "concordant_same_direction", "edgeR_significant", "DESeq2_significant")) {
+  print(plot_partner_type_confusion(analysis, result_set))
 }
 ```
 
+# Target-Gene Views
+
+Configured target IDs are matched against GFF identifiers and RNAnue arm feature IDs.
+
 ```{r}
-#| eval: !expr 'found_sig_res'
 #| echo: false
-#| fig-width: 8
+knitr::kable(head(analysis$postprocess$gff_annotation$target_gene_interactions, 30))
+```
+
+Normalized counts for called target interactions.
+
+```{r}
+#| echo: false
+#| fig-width: 10
 #| fig-height: 8
-
-
-
-sample_bound = 30
-z_score_counts = select_ordered_norm_counts(analysis, n = sample_bound)
-padj = select_ordered_padj(analysis, n = sample_bound)
-sample_bound = min(sample_bound, nrow(z_score_counts))
-
-pheatmap(z_score_counts, cluster_rows=TRUE, show_rownames=TRUE,
-         cluster_cols=FALSE, annotation_col=analysis$metadata_df, annotation_row = padj, main = str_glue("Top {sample_bound} Variance Stabilized\nZ-Scored Counts of Sig. Interactions"))
-
+print(plot_target_gene_normalized_counts(analysis))
 ```
 
-### Significant Interactions of Interest within Results
+# Output Manifest
 
-```{r}
-#| eval: !expr found_sig_res
-#| echo: false
-#| results: asis
-#| fig-show: asis
+The render writes TSV outputs to `r analysis$params$out_dir` and overwrites files with the same names.
 
-
-feature_id_list = unlist(strsplit(params$feature_ids, ","))
-
-for (feature_id_str in feature_id_list) {
-  cat(str_glue("#### Target interaction {feature_id_str}\n\n"))
-  
-  # 1) subset the BED df, check rows
-  target_rows = interactions_bed[
-    grepl(feature_id_str, interactions_bed$X12) |
-    grepl(feature_id_str, interactions_bed$X13),
-  ]
-  
-  if (nrow(target_rows) < 1) {
-    cat("*No interactions found*\n\n")
-    next
-  }
-  
-  # 2) pull out the interaction IDs
-  target_interactions = target_rows$X7
-  
-  # 3) subset your normalized‐counts matrix, check rows
-  target_norm_counts = analysis$norm_counts[rownames(analysis$norm_counts) %in% target_interactions, , drop = FALSE]
-  if (nrow(target_norm_counts) < 1) {
-    cat("*No normalized counts found for those interactions*\n\n")
-    next
-  }
-  
-  # 4) order by average abundance
-  target_norm_counts = target_norm_counts[
-    order(rowMeans(target_norm_counts), decreasing = TRUE),
-  , drop = FALSE]
-  
-  # 5) print tables if you need to inspect them
-  target_norm_counts
-  target_rows[target_rows$X7 %in% rownames(target_norm_counts), ]
-  
-  p = pheatmap(
-    target_norm_counts,
-    cluster_rows    = FALSE,
-    cluster_cols    = FALSE,
-    show_rownames   = TRUE,
-    annotation_col  = analysis$metadata_df,
-    main            = str_glue("Log counts of sig. interactions of {feature_id_str}")
-  )
-  print(p)
-  
-  cat("\n\n")
-}
-
-```
-
-### Annotated Results
+Output manifest for this render.
 
 ```{r}
 #| echo: false
-#| eval: !expr found_sig_res
-
-annotated_sig_interactions = annotate_sig_interactions(analysis, annotation_gff)
-
-
-annotated_sig_interactions
-
-result_path = str_glue("{params$out_dir}/condition_{condition_levels[1]}_vs_{condition_levels[2]}_padj{params$padj_thresh}_sig_results_annotated.bedpe")
-
-write.table(annotated_sig_interactions, result_path, na = "NA", append = TRUE, col.names = TRUE, row.names = FALSE, sep = "\t", quote = TRUE)
-
-# Export to bed file
-```
-
-### Interaction Count by unambiguous Bio-Type
-
-```{r}
-#| echo: false
-#| eval: !expr found_sig_res
-
-unambiguous_results = prepare_unambiguous_results(annotated_sig_interactions)
-
-# intra- (same-gene) interactions
-intra_mat = get_biotype_matrix(unambiguous_results, "intra")
-plot_biotype_heatmap(
-  intra_mat,
-  "Cross-tabulation of Intramolecular Interaction\nBiotype 1 vs Biotype 2"
-)
-
-# inter- (different-gene) interactions
-inter_mat = get_biotype_matrix(unambiguous_results, "inter")
-plot_biotype_heatmap(
-  inter_mat,
-  "Cross-tabulation of Intermolecular Interaction\nBiotype 1 vs Biotype 2"
-)
+output_files <- list.files(analysis$params$out_dir, full.names = FALSE)
+knitr::kable(data.frame(output_file = output_files))
 ```

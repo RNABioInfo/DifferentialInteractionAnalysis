@@ -1,23 +1,10 @@
-sig_results = function(obj, ...) {
-  UseMethod("sig_results")
-}
+sig_results <- function(obj, ...) UseMethod("sig_results")
 
-sig_results.EdgeRAnalysis = function(obj, sorted_by = "FDR") {
-  res = as.data.frame(topTags(obj$edgeR_results, n = Inf, p.value = obj$params$padj_threshold))
-  
-  if (nrow(res) < 2) {
-    return(res)
+sig_results.InteractionAnalysis <- function(obj, method = NULL, ...) {
+  method <- method %||% names(obj$method_results)[1]
+  if (is.null(method) || !method %in% names(obj$method_results)) {
+    stop("Requested method has not been run: ", method, call. = FALSE)
   }
-  
-  res = res[order(res[[sorted_by]]),]
-  
-  return(res)
-}
-
-sig_results.DESeq2Analysis = function(obj, sorted_by = "padj") {
-  res = obj$deseq_results[obj$deseq_results$pvalue <= obj$params$padj_threshold,]
-  res = res[order(res[[sorted_by]]),]
-  
-  
-  return(as.data.frame(res))
+  res <- obj$method_results[[method]]$annotated_results
+  res[res$significant, , drop = FALSE]
 }

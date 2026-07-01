@@ -1,17 +1,167 @@
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) {
+    return(y)
+  }
+  x
+}
+
+as_character_vector <- function(x, default = character()) {
+  if (is.null(x)) {
+    return(default)
+  }
+  if (is.list(x)) {
+    return(unlist(x, use.names = FALSE))
+  }
+  x
+}
+
+sanitize_id <- function(x) {
+  gsub("[^A-Za-z0-9_.-]+", "_", x)
+}
+
+is_present <- function(x) {
+  !is.null(x) && length(x) > 0 && !is.na(x) && nzchar(x)
+}
+
+resolve_stage_dir <- function(root_dir, stage_name, explicit_dir = NULL) {
+  if (is_present(explicit_dir)) {
+    return(explicit_dir)
+  }
+  if (!is_present(root_dir)) {
+    return(NA_character_)
+  }
+
+  unlabelled <- file.path(root_dir, stage_name)
+  if (dir.exists(unlabelled)) {
+    return(unlabelled)
+  }
+
+  stage_matches <- list.files(
+    root_dir,
+    pattern = paste0("^", stage_name, "($|_)"),
+    full.names = TRUE
+  )
+  stage_matches <- stage_matches[dir.exists(stage_matches)]
+  if (length(stage_matches) == 1) {
+    return(stage_matches[1])
+  }
+
+  unlabelled
+}
+
 AnalysisParameters <- function(params) {
+  rnanue_results_dir <- params$rnanue_results_dir %||% NA_character_
+
+  postprocess_dir <- resolve_stage_dir(
+    rnanue_results_dir,
+    "05_postprocess",
+    explicit_dir = params$postprocess_dir
+  )
+
+  detect_dir <- resolve_stage_dir(
+    rnanue_results_dir,
+    "03_detect",
+    explicit_dir = params$detect_dir
+  )
+
+  analyze_dir <- resolve_stage_dir(
+    rnanue_results_dir,
+    "04_analyze",
+    explicit_dir = params$analyze_dir
+  )
+
+  primary_contrast <- params$primary_contrast %||% list()
+  normalization <- params$normalization %||% list()
+  count_handling <- params$count_handling %||% list()
+  high_confidence <- params$high_confidence %||% list()
+  batch_correction <- params$batch_correction %||% list()
+  annotation <- params$annotation %||% list()
+  legacy_feature_ids <- params$feature_ids %||% ""
+  annotation_gff_file <- annotation$gff_file %||% params$annotations_file %||% NA_character_
+  annotation_strand_policy <- tolower(annotation$strand_policy %||% "")
+  if (!nzchar(annotation_strand_policy)) {
+    annotation_strand_policy <- if (!is.null(annotation$same_strand)) {
+      if (isTRUE(annotation$same_strand)) "same" else "both"
+    } else {
+      "both"
+    }
+  }
+  batch_mode <- tolower(batch_correction$mode %||% "auto")
+  batch_on_confounded <- tolower(batch_correction$on_confounded %||% "fail")
+  if (!annotation_strand_policy %in% c("same", "opposite", "both")) {
+    stop("annotation.strand_policy must be one of same, opposite, or both.", call. = FALSE)
+  }
+  if (!batch_mode %in% c("auto", "off", "required")) {
+    stop("batch_correction.mode must be one of auto, off, or required.", call. = FALSE)
+  }
+  if (!batch_on_confounded %in% c("fail", "warn_skip")) {
+    stop("batch_correction.on_confounded must be one of fail or warn_skip.", call. = FALSE)
+  }
+
   structure(
-    .Data = list (
-      out_dir = params$out_dir,
-      analysis_method = params$analysis_method,
-      metadata_path = params$metadata_file,
-      interaction_counts_path = params$counts_file,
-      interaction_regions_path = params$interactions_file,
-      annotations_path = params$annotations_file,
-      min_inter_contr = params$min_inter_contr,
-      min_n_samples_inter_contr = params$min_n_samples_contr,
-      min_n_samples_greater_zero = params$min_n_samples_greater_zero,
-      features_ids_of_interest = params$feature_ids,
-      padj_threshold = params$padj_thresh
+    list(
+      out_dir = params$out_dir %||% "results",
+      analysis_method = params$analysis_method %||% "both",
+      metadata_path = params$metadata_file %||% "data/metadata.csv",
+      interaction_counts_path = params$counts_file %||%
+        file.path(postprocess_dir, "complete_super_interaction_transcript_counts.gct"),
+      interaction_regions_path = params$interactions_file %||%
+        file.path(postprocess_dir, "complete_super_interaction_regions.bedpe"),
+      annotations_path = params$annotations_file %||% NA_character_,
+      rnanue_results_dir = rnanue_results_dir,
+      detect_dir = detect_dir,
+      analyze_dir = analyze_dir,
+      case_role = primary_contrast$case_role %||% "treatment",
+      control_role = primary_contrast$control_role %||% "ligation_control",
+      qc_roles = as_character_vector(params$qc_roles, "no_ligation_control"),
+      sample_exposure = normalization$sample_exposure %||% "split_reads",
+      pair_background = isTRUE(normalization$pair_background %||% TRUE),
+      offset_pseudocount = as.numeric(normalization$offset_pseudocount %||% 0.5),
+      batch_correction_mode = batch_mode,
+      batch_columns = as_character_vector(batch_correction$columns, "batch"),
+      batch_on_confounded = batch_on_confounded,
+      batch_visualization_remove_batch = isTRUE(batch_correction$visualization_remove_batch %||% TRUE),
+      edgeR_count_handling = count_handling$edgeR %||% "numeric",
+      DESeq2_count_handling = count_handling$DESeq2 %||% "round",
+      high_confidence_rnanue_padj_max = as.numeric(high_confidence$rnanue_padj_max %||% 0.1),
+      high_confidence_max_no_ligation_count = as.numeric(high_confidence$max_no_ligation_count %||% 0),
+      high_confidence_min_pair_background_fraction = as.numeric(high_confidence$min_pair_background_available_fraction %||% 1),
+      high_confidence_excluded_only_coverage_profiles = as_character_vector(
+        high_confidence$excluded_only_coverage_profiles,
+        "broad_diffuse"
+      ),
+      annotation_enabled = isTRUE(annotation$enabled %||% TRUE),
+      annotation_gff_file = annotation_gff_file,
+      annotation_feature_types = as_character_vector(
+        annotation$feature_types,
+        c("gene", "sRNA", "tRNA", "rRNA", "ncRNA", "transcript", "TU", "CDS", "mobile_genetic_element")
+      ),
+      annotation_ignore_feature_types = as_character_vector(
+        annotation$ignore_feature_types,
+        c("region", "sequence_feature")
+      ),
+      annotation_match_attributes = as_character_vector(
+        annotation$match_attributes,
+        c("ID", "Name", "gene", "locus_tag", "Alias", "Parent")
+      ),
+      annotation_biotype_attributes = as_character_vector(
+        annotation$biotype_attributes,
+        c("gene_biotype", "biotype", "gbkey", "type")
+      ),
+      annotation_seqname_normalization = annotation$seqname_normalization %||% "auto_strip_version",
+      annotation_strand_policy = annotation_strand_policy,
+      annotation_same_strand = identical(annotation_strand_policy, "same"),
+      annotation_min_overlap_bp = as.integer(annotation$min_overlap_bp %||% 1),
+      annotation_target_ids = as_character_vector(annotation$target_ids, legacy_feature_ids),
+      annotation_target_result_sets = as_character_vector(
+        annotation$target_result_sets,
+        c("high_confidence", "concordant_same_direction", "edgeR_significant", "DESeq2_significant")
+      ),
+      min_inter_contr = as.numeric(params$min_inter_contr %||% 10),
+      min_n_samples_inter_contr = as.integer(params$min_n_samples_contr %||% 2),
+      min_n_samples_greater_zero = as.integer(params$min_n_samples_greater_zero %||% 3),
+      features_ids_of_interest = legacy_feature_ids,
+      padj_threshold = as.numeric(params$padj_thresh %||% params$padj_threshold %||% 0.1)
     ),
     class = "AnalysisParameters"
   )
