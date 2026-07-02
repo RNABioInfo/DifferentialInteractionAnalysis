@@ -15,8 +15,8 @@ interaction_result_classes <- function(analysis) {
   ids <- analysis$method_results[[method]]$annotated_results$interaction_id
   classes <- data.frame(
     interaction_id = ids,
-    result_class = "not_significant",
-    high_confidence = FALSE,
+    result_class = rep("not_significant", length(ids)),
+    high_confidence = rep(FALSE, length(ids)),
     stringsAsFactors = FALSE
   )
 
@@ -201,6 +201,34 @@ safe_cv <- function(x) {
 make_candidate_stability <- function(analysis, result_classes) {
   method <- primary_result_method(analysis)
   primary_results <- analysis$method_results[[method]]$annotated_results
+  if (nrow(primary_results) == 0) {
+    return(data.frame(
+      interaction_id = character(),
+      primary_method = character(),
+      treatment_norm_mean = numeric(),
+      control_norm_mean = numeric(),
+      treatment_norm_cv = numeric(),
+      control_norm_cv = numeric(),
+      treatment_detection_prevalence = numeric(),
+      control_detection_prevalence = numeric(),
+      single_sample_dominance = numeric(),
+      min_treatment_over_max_control = numeric(),
+      log2FoldChange = numeric(),
+      pvalue = numeric(),
+      padj = numeric(),
+      significant = logical(),
+      no_ligation_max_count = numeric(),
+      no_ligation_nonzero_samples = integer(),
+      rnanue_min_padj_value = numeric(),
+      rnanue_mean_support_per_effective_bp = numeric(),
+      rnanue_median_arm_balance = numeric(),
+      rnanue_max_coverage_components = numeric(),
+      rnanue_coverage_profiles = character(),
+      result_class = character(),
+      high_confidence = logical(),
+      stringsAsFactors = FALSE
+    ))
+  }
   normalized <- primary_normalized_counts(analysis)
   normalized <- normalized[primary_results$interaction_id, , drop = FALSE]
   raw_counts <- analysis$counts_model[primary_results$interaction_id, , drop = FALSE]

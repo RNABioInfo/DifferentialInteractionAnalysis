@@ -3,8 +3,13 @@ run_method_DESeq2 <- function(analysis) {
   rounded_counts <- round(raw_counts)
   storage.mode(rounded_counts) <- "integer"
   keep <- custom_count_filter(rounded_counts, analysis$params)
-  if (!any(keep)) {
-    stop("DESeq2 filtering removed all interactions.", call. = FALSE)
+  rounding <- rounding_diagnostics(raw_counts, rounded_counts)
+  filtered_counts <- rounded_counts[keep, , drop = FALSE]
+  filtered_offset <- analysis$log_offset[rownames(filtered_counts), colnames(filtered_counts), drop = FALSE]
+  skip_reason <- method_fit_skip_reason(filtered_counts, filtered_offset)
+  if (!is.null(skip_reason)) {
+    warning("DESeq2 skipped: ", skip_reason, call. = FALSE)
+    return(empty_method_result("DESeq2", rounded_counts, keep, rounding = rounding, reason = skip_reason))
   }
 
   col_data <- analysis$model_metadata
@@ -82,6 +87,6 @@ run_method_DESeq2 <- function(analysis) {
     raw_results = raw_res,
     shrink_results = shrink_res,
     results = result_df,
-    rounding = rounding_diagnostics(raw_counts, rounded_counts)
+    rounding = rounding
   )
 }

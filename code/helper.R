@@ -334,6 +334,53 @@ offset_normalized_counts <- function(counts, log_offset) {
   sweep(counts / offset_scale, 1, row_center, `*`)
 }
 
+method_fit_skip_reason <- function(counts, log_offset = NULL, min_rows = 2) {
+  if (nrow(counts) == 0) {
+    return("count filtering removed all interactions")
+  }
+  if (nrow(counts) < min_rows) {
+    return(paste0(
+      "only ", nrow(counts), " interaction passed filtering; at least ",
+      min_rows, " are required for a stable model fit"
+    ))
+  }
+  library_sizes <- colSums(counts)
+  invalid_libraries <- names(library_sizes)[!is.finite(library_sizes) | library_sizes <= 0]
+  if (length(invalid_libraries) > 0) {
+    return(paste0(
+      "filtered count matrix has zero/invalid library size for sample(s): ",
+      paste(invalid_libraries, collapse = ", ")
+    ))
+  }
+  if (!is.null(log_offset) && any(!is.finite(log_offset))) {
+    return("filtered offset matrix contains non-finite values")
+  }
+  NULL
+}
+
+empty_method_result <- function(method, counts, filter_keep, rounding = NULL, reason = NA_character_) {
+  empty_counts <- counts[FALSE, , drop = FALSE]
+  storage.mode(empty_counts) <- "numeric"
+  results <- data.frame(
+    interaction_id = character(),
+    method = character(),
+    log2FoldChange = numeric(),
+    pvalue = numeric(),
+    padj = numeric(),
+    stringsAsFactors = FALSE
+  )
+  list(
+    method = method,
+    counts = empty_counts,
+    normalized_counts = empty_counts,
+    filter_keep = filter_keep,
+    results = results,
+    rounding = rounding,
+    skipped = TRUE,
+    skip_reason = reason
+  )
+}
+
 rounding_diagnostics <- function(raw_counts, rounded_counts) {
   data.frame(
     sample_id = colnames(raw_counts),
@@ -423,9 +470,9 @@ augment_method_results <- function(analysis, method_result) {
   augmented <- dplyr::left_join(augmented, metrics, by = "interaction_id")
 
   raw_counts <- analysis$counts_model[augmented$interaction_id, , drop = FALSE]
-  names(raw_counts) <- paste0("raw_count_", colnames(raw_counts))
+  colnames(raw_counts) <- paste0("raw_count_", colnames(raw_counts))
   normalized_counts <- method_result$normalized_counts[augmented$interaction_id, , drop = FALSE]
-  names(normalized_counts) <- paste0("normalized_count_", colnames(normalized_counts))
+  colnames(normalized_counts) <- paste0("normalized_count_", colnames(normalized_counts))
 
   control_samples <- analysis$model_metadata$sample_id[analysis$model_metadata$role == analysis$params$control_role]
   case_samples <- analysis$model_metadata$sample_id[analysis$model_metadata$role == analysis$params$case_role]
@@ -439,8 +486,8 @@ augment_method_results <- function(analysis, method_result) {
     augmented$no_ligation_max_count <- apply(qc_counts, 1, max, na.rm = TRUE)
     augmented$no_ligation_nonzero_samples <- rowSums(qc_counts > 0)
   } else {
-    augmented$no_ligation_max_count <- NA_real_
-    augmented$no_ligation_nonzero_samples <- NA_integer_
+    augmented$no_ligation_max_count <- rep(NA_real_, nrow(augmented))
+    augmented$no_ligation_nonzero_samples <- rep(NA_integer_, nrow(augmented))
   }
   augmented$significant <- !is.na(augmented$padj) &
     augmented$padj <= analysis$params$padj_threshold

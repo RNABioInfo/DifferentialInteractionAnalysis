@@ -12,8 +12,12 @@ run_method_edgeR <- function(analysis) {
     }
   )
   keep <- keep_custom & keep_expr
-  if (!any(keep)) {
-    stop("edgeR filtering removed all interactions.", call. = FALSE)
+  filtered_counts <- dge$counts[keep, , drop = FALSE]
+  filtered_offset <- analysis$log_offset[rownames(filtered_counts), colnames(filtered_counts), drop = FALSE]
+  skip_reason <- method_fit_skip_reason(filtered_counts, filtered_offset)
+  if (!is.null(skip_reason)) {
+    warning("edgeR skipped: ", skip_reason, call. = FALSE)
+    return(empty_method_result("edgeR", dge$counts, keep, reason = skip_reason))
   }
 
   dge <- dge[keep, , keep.lib.sizes = FALSE]
