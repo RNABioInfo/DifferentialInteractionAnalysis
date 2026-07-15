@@ -49,7 +49,68 @@ resolve_stage_dir <- function(root_dir, stage_name, explicit_dir = NULL) {
   unlabelled
 }
 
+resolve_rnanue_result_file <- function(rnanue_results_dir, postprocess_dir, filename) {
+  candidates <- character()
+  if (is_present(postprocess_dir)) {
+    candidates <- c(candidates, file.path(postprocess_dir, filename))
+  }
+  if (is_present(rnanue_results_dir)) {
+    candidates <- c(candidates, file.path(rnanue_results_dir, filename))
+  }
+
+  existing_candidates <- unique(candidates[file.exists(candidates)])
+  if (length(existing_candidates) > 0) {
+    return(existing_candidates[1])
+  }
+
+  if (is_present(rnanue_results_dir) && dir.exists(rnanue_results_dir)) {
+    matches <- list.files(
+      rnanue_results_dir,
+      pattern = paste0("^", filename, "$"),
+      recursive = TRUE,
+      full.names = TRUE
+    )
+    matches <- unique(matches[file.exists(matches)])
+    postprocess_matches <- matches[grepl("^05_postprocess($|_)", basename(dirname(matches)))]
+
+    if (length(postprocess_matches) == 1) {
+      return(postprocess_matches[1])
+    }
+    if (length(matches) == 1) {
+      return(matches[1])
+    }
+    if (length(matches) > 1) {
+      stop(
+        "Could not infer ", filename, " from rnanue_results_dir because multiple matches were found. ",
+        "Set postprocess_dir explicitly. Matches: ",
+        paste(matches, collapse = ", "),
+        call. = FALSE
+      )
+    }
+  }
+
+  if (is_present(postprocess_dir)) {
+    return(file.path(postprocess_dir, filename))
+  }
+  stop("rnanue_results_dir or postprocess_dir must be set to discover ", filename, ".", call. = FALSE)
+}
+
+reject_retired_input_params <- function(params) {
+  retired_params <- c("counts_file", "interactions_file")
+  present_params <- retired_params[vapply(retired_params, function(name) !is.null(params[[name]]), logical(1))]
+  if (length(present_params) > 0) {
+    stop(
+      "Retired input parameter(s) are no longer supported: ",
+      paste(present_params, collapse = ", "),
+      ". Use rnanue_results_dir and optional stage-level overrides instead.",
+      call. = FALSE
+    )
+  }
+}
+
 AnalysisParameters <- function(params) {
+  reject_retired_input_params(params)
+
   rnanue_results_dir <- params$rnanue_results_dir %||% NA_character_
 
   postprocess_dir <- resolve_stage_dir(
@@ -103,12 +164,19 @@ AnalysisParameters <- function(params) {
       out_dir = params$out_dir %||% "results",
       analysis_method = params$analysis_method %||% "both",
       metadata_path = params$metadata_file %||% "data/metadata.csv",
-      interaction_counts_path = params$counts_file %||%
-        file.path(postprocess_dir, "complete_super_interaction_transcript_counts.gct"),
-      interaction_regions_path = params$interactions_file %||%
-        file.path(postprocess_dir, "complete_super_interaction_regions.bedpe"),
+      interaction_counts_path = resolve_rnanue_result_file(
+        rnanue_results_dir,
+        postprocess_dir,
+        "complete_super_interaction_transcript_counts.gct"
+      ),
+      interaction_regions_path = resolve_rnanue_result_file(
+        rnanue_results_dir,
+        postprocess_dir,
+        "complete_super_interaction_regions.bedpe"
+      ),
       annotations_path = params$annotations_file %||% NA_character_,
       rnanue_results_dir = rnanue_results_dir,
+      postprocess_dir = postprocess_dir,
       detect_dir = detect_dir,
       analyze_dir = analyze_dir,
       case_role = primary_contrast$case_role %||% "treatment",
@@ -124,12 +192,6 @@ AnalysisParameters <- function(params) {
       edgeR_count_handling = count_handling$edgeR %||% "numeric",
       DESeq2_count_handling = count_handling$DESeq2 %||% "round",
       high_confidence_rnanue_padj_max = as.numeric(high_confidence$rnanue_padj_max %||% 0.1),
-      high_confidence_max_no_ligation_count = as.numeric(high_confidence$max_no_ligation_count %||% 0),
-      high_confidence_min_pair_background_fraction = as.numeric(high_confidence$min_pair_background_available_fraction %||% 1),
-      high_confidence_excluded_only_coverage_profiles = as_character_vector(
-        high_confidence$excluded_only_coverage_profiles,
-        "broad_diffuse"
-      ),
       annotation_enabled = isTRUE(annotation$enabled %||% TRUE),
       annotation_gff_file = annotation_gff_file,
       annotation_feature_types = as_character_vector(

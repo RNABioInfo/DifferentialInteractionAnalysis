@@ -87,13 +87,13 @@ read_metadata <- function(metadata_file_path, params) {
   metadata_df
 }
 
-read_counts <- function(counts_file_path) {
-  if (!file.exists(counts_file_path)) {
-    stop("Interaction count file does not exist: ", counts_file_path, call. = FALSE)
+read_counts <- function(counts_path) {
+  if (!file.exists(counts_path)) {
+    stop("Interaction count file does not exist: ", counts_path, call. = FALSE)
   }
 
   counts_raw <- readr::read_delim(
-    counts_file_path,
+    counts_path,
     delim = "\t",
     skip = 2,
     name_repair = "minimal",
@@ -115,14 +115,14 @@ read_counts <- function(counts_file_path) {
   counts_df
 }
 
-read_interactions <- function(interactions_file_path) {
-  if (!file.exists(interactions_file_path)) {
-    stop("Interaction BEDPE file does not exist: ", interactions_file_path, call. = FALSE)
+read_interactions <- function(interactions_path) {
+  if (!file.exists(interactions_path)) {
+    stop("Interaction BEDPE file does not exist: ", interactions_path, call. = FALSE)
   }
 
   bedpe <- as.data.frame(
     readr::read_delim(
-      interactions_file_path,
+      interactions_path,
       delim = "\t",
       skip = 2,
       col_names = FALSE,

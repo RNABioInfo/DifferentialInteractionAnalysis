@@ -36,8 +36,6 @@ params <- list(
   out_dir = out_dir,
   analysis_method = "both",
   metadata_file = file.path(fixture_dir, "metadata.csv"),
-  counts_file = file.path(fixture_dir, "complete_super_interaction_transcript_counts.gct"),
-  interactions_file = file.path(fixture_dir, "complete_super_interaction_regions.bedpe"),
   annotations_file = file.path(fixture_dir, "synthetic_annotations.gff3"),
   rnanue_results_dir = fixture_dir,
   primary_contrast = list(case_role = "treatment", control_role = "ligation_control"),
@@ -61,6 +59,40 @@ params <- list(
   padj_thresh = 0.25
 )
 
+retired_param_error <- tryCatch(
+  {
+    AnalysisParameters(c(params, list(counts_file = file.path(fixture_dir, "old.gct"))))
+    NULL
+  },
+  error = function(e) e$message
+)
+stopifnot(!is.null(retired_param_error))
+stopifnot(grepl("Retired input parameter", retired_param_error))
+
+make_temp_postprocess_dir <- function(counts_path, bedpe_path) {
+  postprocess_dir <- tempfile("dia_smoke_postprocess_")
+  dir.create(postprocess_dir, showWarnings = FALSE, recursive = TRUE)
+  file.copy(
+    counts_path,
+    file.path(postprocess_dir, "complete_super_interaction_transcript_counts.gct")
+  )
+  file.copy(
+    bedpe_path,
+    file.path(postprocess_dir, "complete_super_interaction_regions.bedpe")
+  )
+  postprocess_dir
+}
+
+discovery_analysis <- make_analysis(params)
+stopifnot(identical(
+  normalizePath(discovery_analysis$params$interaction_counts_path),
+  normalizePath(file.path(fixture_dir, "complete_super_interaction_transcript_counts.gct"))
+))
+stopifnot(identical(
+  normalizePath(discovery_analysis$params$interaction_regions_path),
+  normalizePath(file.path(fixture_dir, "complete_super_interaction_regions.bedpe"))
+))
+
 analysis <- make_analysis(params)
 stopifnot(inherits(analysis, "InteractionAnalysis"))
 stopifnot(setequal(analysis$model_metadata$sample_id, c("c1", "c2", "t1", "t2")))
@@ -77,7 +109,7 @@ stopifnot(all(
     analysis$sample_qc$splits + analysis$sample_qc$singletons
 ))
 stopifnot(all(analysis$sample_qc$mapped_read_source == "rnanue_splits_plus_singletons"))
-expected_interaction_sums <- colSums(read_counts(params$counts_file)[, analysis$sample_qc$sample_id, drop = FALSE])
+expected_interaction_sums <- colSums(read_counts(analysis$params$interaction_counts_path)[, analysis$sample_qc$sample_id, drop = FALSE])
 stopifnot(all(analysis$sample_qc$interaction_library_sum == unname(expected_interaction_sums)))
 stopifnot(!all(analysis$sample_qc$interaction_library_sum == analysis$sample_qc$mapped_read_count))
 
@@ -93,6 +125,11 @@ stopifnot(file.exists(file.path(out_dir, "batch_balance.tsv")))
 stopifnot(file.exists(file.path(out_dir, "analysis_warnings.tsv")))
 stopifnot(readLines(file.path(out_dir, "analysis_warnings.tsv"), n = 1) == "warning_index\tstage\tmethod\tmessage")
 stopifnot(all(c("edgeR", "DESeq2") %in% names(analysis$method_results)))
+stopifnot(identical(
+  analysis$method_results$edgeR$filter_keep,
+  custom_count_filter(analysis$counts_model, analysis$params)
+))
+stopifnot(all(analysis$method_results$edgeR$dataset$samples$norm.factors == 1))
 stopifnot(file.exists(file.path(out_dir, "edgeR_results.tsv")))
 stopifnot(file.exists(file.path(out_dir, "DESeq2_results.tsv")))
 stopifnot(file.exists(file.path(out_dir, "method_concordance.tsv")))
@@ -225,7 +262,10 @@ multi_cluster_bedpe_path <- tempfile("multi_cluster_rnanue_", fileext = ".bedpe"
 writeLines(multi_cluster_bedpe_lines, multi_cluster_bedpe_path)
 multi_cluster_params <- params
 multi_cluster_params$out_dir <- tempfile("dia_smoke_multi_cluster_")
-multi_cluster_params$interactions_file <- multi_cluster_bedpe_path
+multi_cluster_params$postprocess_dir <- make_temp_postprocess_dir(
+  analysis$params$interaction_counts_path,
+  multi_cluster_bedpe_path
+)
 multi_cluster_analysis <- make_analysis(multi_cluster_params)
 multi_cluster_analysis <- run_analysis(multi_cluster_analysis)
 multi_cluster_concordance <- readr::read_tsv(
@@ -253,6 +293,32 @@ multi_cluster_si0_padj_comparison <- multi_cluster_padj_comparison[
 stopifnot(nrow(multi_cluster_si0_padj_comparison) == 1)
 stopifnot(grepl("t1:0.006;t2:0.006", multi_cluster_si0_padj_comparison$rnanue_condition_sample_padj_values, fixed = TRUE))
 stopifnot(all(c("high_confidence", "DESeq2_log2FoldChange", "pair_background_available_fraction") %in% names(high_conf)))
+
+relaxed_high_conf_analysis <- analysis
+relaxed_high_conf_id <- relaxed_high_conf_analysis$method_results$edgeR$annotated_results$interaction_id[1]
+edgeR_index <- match(
+  relaxed_high_conf_id,
+  relaxed_high_conf_analysis$method_results$edgeR$annotated_results$interaction_id
+)
+DESeq2_index <- match(
+  relaxed_high_conf_id,
+  relaxed_high_conf_analysis$method_results$DESeq2$annotated_results$interaction_id
+)
+normalization_index <- match(
+  relaxed_high_conf_id,
+  relaxed_high_conf_analysis$normalization_diagnostics$interaction_id
+)
+relaxed_high_conf_analysis$method_results$edgeR$annotated_results$significant[edgeR_index] <- TRUE
+relaxed_high_conf_analysis$method_results$edgeR$annotated_results$log2FoldChange[edgeR_index] <- 1
+relaxed_high_conf_analysis$method_results$edgeR$annotated_results$rnanue_min_padj_value[edgeR_index] <- 0.01
+relaxed_high_conf_analysis$method_results$edgeR$annotated_results$no_ligation_max_count[edgeR_index] <- 1e6
+relaxed_high_conf_analysis$method_results$edgeR$annotated_results$rnanue_coverage_profiles[edgeR_index] <- "broad_diffuse"
+relaxed_high_conf_analysis$method_results$DESeq2$annotated_results$padj[DESeq2_index] <- 0.01
+relaxed_high_conf_analysis$method_results$DESeq2$annotated_results$log2FoldChange[DESeq2_index] <- 1
+relaxed_high_conf_analysis$normalization_diagnostics$pair_background_available_fraction[normalization_index] <- 0
+relaxed_high_conf_results <- make_high_confidence_results(relaxed_high_conf_analysis)
+stopifnot(relaxed_high_conf_id %in% relaxed_high_conf_results$interaction_id)
+
 stopifnot(all(c("chr1", "start1", "end1", "chr2", "start2", "end2", "interaction_id") %in% names(high_conf_bedpe)))
 stopifnot(all(c("chrom", "start", "end", "name", "score", "strand") %in% names(high_conf_region_tsv)))
 stopifnot(nrow(high_conf_region_bed) == 2 * nrow(high_conf))
@@ -308,7 +374,10 @@ mutated_bedpe_path <- tempfile("mutated_rnanue_ids_", fileext = ".bedpe")
 writeLines(mutated_bedpe_lines, mutated_bedpe_path)
 mutated_params <- params
 mutated_params$out_dir <- tempfile("dia_smoke_mutated_rnanue_ids_")
-mutated_params$interactions_file <- mutated_bedpe_path
+mutated_params$postprocess_dir <- make_temp_postprocess_dir(
+  analysis$params$interaction_counts_path,
+  mutated_bedpe_path
+)
 mutated_analysis <- make_analysis(mutated_params)
 mutated_arms <- interaction_arm_table(mutated_analysis, analysis$postprocess$result_classes)
 mutated_arms <- mutated_arms[mutated_arms$interaction_id %in% called_ids, , drop = FALSE]

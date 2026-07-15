@@ -24,3 +24,4 @@ renv.lock
 
 /.quarto/
 **/*.quarto_ipynb
+README.md

@@ -8,7 +8,7 @@ sample_qc_plots <- function(analysis) {
     ggplot2::theme_light() +
     ggplot2::labs(
       x = "Sample",
-      y = "Mapped/read-classified reads",
+      y = "Mapped reads",
       title = "Mapped/read-classified reads by sample"
     )
 
@@ -28,9 +28,9 @@ sample_qc_plots <- function(analysis) {
     ggplot2::geom_text(vjust = -0.8, size = 3, show.legend = FALSE) +
     ggplot2::theme_light() +
     ggplot2::labs(
-      x = "Mapped/read-classified reads",
+      x = "Mapped reads",
       y = "Interaction count sum",
-      title = "Mapped/read-classified reads vs interaction count sum"
+      title = "Mapped reads vs interaction count sum"
     )
 
   split_fraction <- ggplot2::ggplot(qc, ggplot2::aes(x = sample_id, y = split_fraction, fill = role)) +

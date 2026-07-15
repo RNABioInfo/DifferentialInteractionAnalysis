@@ -15,13 +15,11 @@ project:
   execute-dir: project
 
 params:
-  out_dir: "results"
+  out_dir: "results_synechocystis_dia_dark"
   analysis_method: "both"
   metadata_file: "data/metadata.csv"
-  counts_file: "data/complete_super_interaction_transcript_counts.gct"
-  interactions_file: "data/complete_super_interaction_regions.bedpe"
   annotations_file: "/Users/christopherphd/Downloads/Syn_final_modified.gff"
-  rnanue_results_dir: "/Volumes/chris_ssd_2/external/hyderabad_synechocystis/results_dark"
+  rnanue_results_dir: "/Volumes/chris_ssd_2/external/hyderabad_synechocystis/results_dark_v2"
   detect_dir: null
   analyze_dir: null
   postprocess_dir: null
@@ -44,10 +42,6 @@ params:
   high_confidence:
     value:
       rnanue_padj_max: 0.1
-      max_no_ligation_count: 0
-      min_pair_background_available_fraction: 1
-      excluded_only_coverage_profiles:
-        - "broad_diffuse"
   annotation:
     value:
       enabled: true
@@ -119,7 +113,7 @@ invisible(lapply(source_code_files, source))
 
 # Analysis Overview
 
-This report tests whether RNAnue interaction counts are enriched in treatment samples relative to ligation controls. No-ligation samples are QC-only and are excluded from the primary model.
+This report tests whether RNAnue interaction counts are enriched in treatment samples relative to ligation controls. No-ligation samples are QC-only and are excluded from the analysis.
 
 ```{r}
 #| echo: false
@@ -137,8 +131,11 @@ knitr::kable(data.frame(
   parameter = c(
     "analysis_method",
     "primary contrast",
+    "interaction_counts_path",
+    "interaction_regions_path",
     "detect_dir",
     "analyze_dir",
+    "postprocess_dir",
     "padj_threshold",
     "design_formula",
     "batch_status",
@@ -150,8 +147,11 @@ knitr::kable(data.frame(
   value = c(
     analysis$params$analysis_method,
     paste0(analysis$params$case_role, " vs ", analysis$params$control_role),
+    analysis$params$interaction_counts_path,
+    analysis$params$interaction_regions_path,
     analysis$params$detect_dir,
     analysis$params$analyze_dir,
+    analysis$params$postprocess_dir,
     analysis$params$padj_threshold,
     paste(deparse(analysis$design_formula), collapse = ""),
     analysis$design_diagnostics$batch_status[1],
@@ -170,16 +170,14 @@ knitr::kable(data.frame(
 
 # Sample Roles And Model Design
 
-Sample metadata. Treatment and ligation-control samples enter the model; no-ligation samples are QC-only.
+Sample metadata. Treatment and ligation-control samples used in the model.
 
 ```{r}
 #| echo: false
 knitr::kable(analysis$metadata)
 ```
 
-Usable batch columns are added as fixed effects. Confounded batch columns stop the render before model fitting.
-
-Design diagnostics: formula, batch handling, matrix rank, and tested coefficient.
+If provided, batch columns are added as fixed effects.
 
 ```{r}
 #| echo: false
@@ -199,7 +197,9 @@ if (nrow(analysis$batch_balance) > 0) {
 
 # Sample-Level Quality Control
 
-QC plots show read depth, interaction library size, interaction yield, and split-read fraction by sample role. `mapped_read_count` uses RNAnue `mapped_reads` when available, otherwise `splits + singletons`; `interaction_library_sum` is the per-sample sum of the interaction-count matrix.
+QC plots show read depth, interaction library size, interaction yield, and split-read fraction by sample role. 
+`mapped_read_count` uses RNAnue `mapped_reads` when available, otherwise `splits + singletons`. 
+`interaction_library_sum` is the per-sample sum of the interaction-count matrix.
 
 ```{r}
 #| echo: false
@@ -238,7 +238,7 @@ No-ligation QC output: `no_ligation_qc.tsv`.
 
 # Count Matrix And Normalization
 
-Zero-count fraction per sample, ordered by role. High sparsity can reduce power and affect dispersion estimates.
+Zero-count fraction per sample.
 
 ```{r}
 #| echo: false
@@ -247,7 +247,7 @@ Zero-count fraction per sample, ordered by role. High sparsity can reduce power 
 print(plot_sparsity_overview(analysis))
 ```
 
-PCA of all filtered model interactions after log2 offset normalization.
+PCA of all filtered interactions after log2 offset normalization.
 
 ```{r}
 #| echo: false
@@ -256,7 +256,7 @@ PCA of all filtered model interactions after log2 offset normalization.
 print(plot_pca_assessment(analysis, "all_model_filtered"))
 ```
 
-Pairwise Spearman correlations on log2 offset-normalized counts, ordered by role.
+Pairwise Spearman correlations on log2 offset-normalized counts.
 
 ```{r}
 #| echo: false
@@ -265,7 +265,9 @@ Pairwise Spearman correlations on log2 offset-normalized counts, ordered by role
 print(plot_sample_correlation_heatmap(analysis))
 ```
 
-Pair background is available when both interaction arms map to transcript-count features in a model sample. A fraction of `1` means all model samples used the pair-background offset for that interaction.
+Paired interaction background is available when both interaction arms map to transcript-count features in a sample. 
+Currently this is not implemented for supplementary features.
+A fraction of `1` means all model samples used the pair-background offset for that interaction.
 
 The plots summarize pair-background availability and final log-offset variation.
 
@@ -280,7 +282,7 @@ Normalization diagnostics output: `normalization_diagnostics.tsv`.
 
 # Differential Enrichment
 
-Top annotated interactions for each DIA method. p-values and FDR come from the method-specific negative-binomial model; RNAnue and QC fields are included for context.
+Top annotated interactions for each DIA method.
 
 ```{r}
 #| echo: false
@@ -314,7 +316,7 @@ for (method in names(analysis$method_results)) {
 
 # DIA Method Agreement
 
-Counts of edgeR/DESeq2 agreement classes. Concordant same-direction calls are stronger candidates, but still only enrichment evidence.
+Counts of edgeR/DESeq2 agreement interaction canditdates.
 
 ```{r}
 #| echo: false
@@ -334,7 +336,7 @@ edgeR versus DESeq2 log2 fold changes for the same interactions.
 print(plot_concordance(analysis))
 ```
 
-Top agreement records with both methods' statistics, result class, and RNAnue sample-level padj entries when available.
+Top agreement records with for both method statistics, result class, and RNAnue sample-level padj entries when available.
 
 ```{r}
 #| echo: false
@@ -345,11 +347,8 @@ if (!is.null(analysis$concordance)) {
 
 # High-Confidence Candidates
 
-High-confidence candidates pass all configured gates: edgeR, DESeq2, RNAnue support, no-ligation QC, pair-background availability, and coverage-profile filters.
-
+High-confidence candidates pass all configured cutoffs: edgeR, DESeq2, RNAnue support.
 Candidate outputs include a full TSV, paired BEDPE, and region-level BED.
-
-Evidence ledger for the high-confidence tier.
 
 ```{r}
 #| echo: false
@@ -369,16 +368,14 @@ if (nrow(high_confidence) > 0) {
 
 # Result Stability
 
-Significant-result PCAs are exploratory QC. They are selection-biased because features come from the same differential test.
-
-PCA diagnostics: computed and skipped feature sets.
+Significant-result PCAs. They are selection-biased because features come from the same differential test.
 
 ```{r}
 #| echo: false
 knitr::kable(analysis$postprocess$pca_diagnostics)
 ```
 
-PCA panels for significant, concordant, and high-confidence feature subsets.
+PCA panels for significant, concordant, and high-confidence interaction subsets.
 
 ```{r}
 #| echo: false
@@ -393,8 +390,6 @@ for (pca_set in setdiff(names(analysis$postprocess$pca_scores), "all_model_filte
 
 Row-scaled log2 offset-normalized counts for significant interaction sets.
 
-Column annotations follow sample role; row annotations show result class and high-confidence status.
-
 ```{r}
 #| echo: false
 #| fig-width: 9
@@ -406,11 +401,9 @@ for (heatmap_set in c("edgeR_significant", "DESeq2_significant", "concordant_sam
 
 # Normalized Count Profiles
 
-Normalized counts for top called interactions. Points are samples; the black crossbar is the group median.
+Normalized counts for top called interactions. Points are samples, the black crossbar is the group median.
 
 Source data output: `significant_normalized_counts.tsv`.
-
-Large within-role spread or single-sample dominance should reduce confidence.
 
 ```{r}
 #| echo: false
@@ -421,7 +414,7 @@ for (count_set in c("edgeR_significant", "DESeq2_significant", "concordant_same_
 }
 ```
 
-Candidate stability by interaction: group means, CVs, prevalence, dominance, treatment-control separation, and no-ligation burden.
+Candidate stability by interaction: group means, CVs, prevalence, dominance, treatment-control separation, and no-ligation fraction.
 
 ```{r}
 #| echo: false
@@ -435,35 +428,11 @@ RNAnue metric summary by result class.
 knitr::kable(analysis$postprocess$rnanue_metric_group_summary)
 ```
 
-# RNAnue Support Agreement
-
-Primary DIA FDR versus RNAnue treatment-sample support. Rows without finite DIA adjusted p-values are excluded; rows without RNAnue padj remain in the source table.
-
-RNAnue support is summarized from each treatment sample's minimum native padj. Outputs: `dia_rnanue_padj_comparison.tsv` and `dia_rnanue_discordance.tsv`.
-
-The density scatter shows global agreement and highlights non-background result classes.
-
-```{r}
-#| echo: false
-#| fig-width: 9
-#| fig-height: 6
-print(plot_dia_rnanue_padj_comparison(analysis))
-```
-
-Discordance classes separate shared, DIA-only, RNAnue-only, and unsupported evidence.
-
-```{r}
-#| echo: false
-#| fig-width: 8
-#| fig-height: 5
-print(plot_dia_rnanue_discordance(analysis))
-```
-
 # Partner Recurrence
 
-Partner-recurrence output: `partner_recurrence.tsv`. Recurrent partners can reflect hubs, abundance, annotation ambiguity, or repeated local clusters.
+Transcript recurrence as interaction partner output: `partner_recurrence.tsv`.
 
-Top recurrent partners and their high-confidence counts.
+Top recurrent partners and their counts.
 
 ```{r}
 #| echo: false
@@ -474,9 +443,7 @@ print(plot_partner_recurrence(analysis))
 
 # Genomic Partner Annotation
 
-Significant interaction arms are annotated against the configured GFF by coordinate overlap. Partner class comes from the selected GFF-overlap feature, not from RNAnue feature IDs.
-
-Annotation diagnostics: run status, annotated arms, unresolved arms, and seqname normalization.
+Significant interaction arms are annotated against the configured GFF by coordinate overlap.
 
 ```{r}
 #| echo: false

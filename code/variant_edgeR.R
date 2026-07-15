@@ -3,15 +3,7 @@ run_method_edgeR <- function(analysis) {
   storage.mode(counts) <- "numeric"
 
   dge <- edgeR::DGEList(counts = counts, group = analysis$model_metadata$contrast_group)
-  keep_custom <- custom_count_filter(dge$counts, analysis$params)
-  keep_expr <- tryCatch(
-    edgeR::filterByExpr(dge, design = analysis$design),
-    error = function(e) {
-      warning("edgeR::filterByExpr failed; using only custom count filters: ", e$message, call. = FALSE)
-      rep(TRUE, nrow(dge))
-    }
-  )
-  keep <- keep_custom & keep_expr
+  keep <- custom_count_filter(dge$counts, analysis$params)
   filtered_counts <- dge$counts[keep, , drop = FALSE]
   filtered_offset <- analysis$log_offset[rownames(filtered_counts), colnames(filtered_counts), drop = FALSE]
   skip_reason <- method_fit_skip_reason(filtered_counts, filtered_offset)
@@ -21,10 +13,7 @@ run_method_edgeR <- function(analysis) {
   }
 
   dge <- dge[keep, , keep.lib.sizes = FALSE]
-  dge <- edgeR::calcNormFactors(dge, method = "TMM")
   edgeR_offset <- analysis$log_offset[rownames(dge$counts), colnames(dge$counts), drop = FALSE]
-  edgeR_offset <- edgeR_offset +
-    matrix(log(dge$samples$norm.factors), nrow = nrow(edgeR_offset), ncol = ncol(edgeR_offset), byrow = TRUE)
   dge$offset <- edgeR_offset
 
   dge <- edgeR::estimateDisp(dge, analysis$design, robust = TRUE)

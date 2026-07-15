@@ -1,12 +1,14 @@
 out_dir: results
 analysis_method: both
 metadata_file: data/metadata.csv
-counts_file: data/complete_super_interaction_transcript_counts.gct
-interactions_file: data/complete_super_interaction_regions.bedpe
 annotations_file: data/TU_details_merged_utr_plus_missing_refseq.gff
 rnanue_results_dir: /Volumes/chris_ssd_2/external/hyderabad_synechocystis/results_dark
-# Optional overrides. By default the pipeline looks for 03_detect, 04_analyze,
-# and 05_postprocess under rnanue_results_dir.
+# Optional stage overrides. By default the pipeline discovers stage directories
+# and complete_super_interaction_* files from rnanue_results_dir, preferring
+# 05_postprocess when present.
+# detect_dir: /path/to/03_detect
+# analyze_dir: /path/to/04_analyze
+# postprocess_dir: /path/to/05_postprocess
 primary_contrast:
   case_role: treatment
   control_role: ligation_control
@@ -27,10 +29,6 @@ count_handling:
   DESeq2: round
 high_confidence:
   rnanue_padj_max: 0.1
-  max_no_ligation_count: 0
-  min_pair_background_available_fraction: 1
-  excluded_only_coverage_profiles:
-    - broad_diffuse
 annotation:
   enabled: true
   gff_file: data/TU_details_merged_utr_plus_missing_refseq.gff

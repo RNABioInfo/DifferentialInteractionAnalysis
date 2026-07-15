@@ -524,15 +524,6 @@ make_concordance <- function(method_results, padj_threshold, native_padj_by_role
   concordance[order(concordance$edgeR_padj, concordance$DESeq2_padj), , drop = FALSE]
 }
 
-coverage_not_only_excluded <- function(profile_string, excluded_profiles) {
-  if (is.na(profile_string) || !nzchar(profile_string)) {
-    return(FALSE)
-  }
-  profiles <- unique(trimws(unlist(strsplit(profile_string, ";", fixed = TRUE), use.names = FALSE)))
-  profiles <- profiles[nzchar(profiles)]
-  length(profiles) > 0 && !all(profiles %in% excluded_profiles)
-}
-
 empty_high_confidence_results <- function() {
   data.frame(
     interaction_id = character(),
@@ -581,24 +572,11 @@ make_high_confidence_results <- function(analysis) {
     confidence$DESeq2_log2FoldChange > 0
   confidence$high_conf_rnanue_native <- !is.na(confidence$rnanue_min_padj_value) &
     confidence$rnanue_min_padj_value <= analysis$params$high_confidence_rnanue_padj_max
-  confidence$high_conf_no_ligation_clean <- is.na(confidence$no_ligation_max_count) |
-    confidence$no_ligation_max_count <= analysis$params$high_confidence_max_no_ligation_count
-  confidence$high_conf_pair_background <- !is.na(confidence$pair_background_available_fraction) &
-    confidence$pair_background_available_fraction >= analysis$params$high_confidence_min_pair_background_fraction
-  confidence$high_conf_coverage_profile <- vapply(
-    confidence$rnanue_coverage_profiles,
-    coverage_not_only_excluded,
-    logical(1),
-    excluded_profiles = analysis$params$high_confidence_excluded_only_coverage_profiles
-  )
 
   confidence$high_confidence <- confidence$high_conf_edgeR_significant &
     confidence$high_conf_DESeq2_significant_positive &
     confidence$high_conf_same_positive_direction &
-    confidence$high_conf_rnanue_native &
-    confidence$high_conf_no_ligation_clean &
-    confidence$high_conf_pair_background &
-    confidence$high_conf_coverage_profile
+    confidence$high_conf_rnanue_native
 
   confidence <- confidence[confidence$high_confidence, , drop = FALSE]
   confidence[order(confidence$padj, confidence$DESeq2_padj), , drop = FALSE]
