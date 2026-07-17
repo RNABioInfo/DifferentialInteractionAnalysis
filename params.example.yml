@@ -1,6 +1,7 @@
 out_dir: results
 analysis_method: both
 metadata_file: data/metadata.csv
+# Exact feature GFF supplied to RNAnue; stable pair-background IDs are read here.
 annotations_file: data/TU_details_merged_utr_plus_missing_refseq.gff
 rnanue_results_dir: /Volumes/chris_ssd_2/external/hyderabad_synechocystis/results_dark
 # Optional stage overrides. By default the pipeline discovers stage directories
@@ -31,7 +32,8 @@ high_confidence:
   rnanue_padj_max: 0.1
 annotation:
   enabled: true
-  gff_file: data/TU_details_merged_utr_plus_missing_refseq.gff
+  # Optional final annotation override. Omit to reuse annotations_file.
+  target_annotations_overwrite: data/TU_details_merged_utr_plus_missing_refseq.gff
   feature_types:
     - gene
     - sRNA

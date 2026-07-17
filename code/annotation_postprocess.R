@@ -251,17 +251,17 @@ prepare_gff_features <- function(params, arm_chroms) {
   if (!params$annotation_enabled) {
     return(list(features = NULL, diagnostics = empty_annotation_diagnostics()))
   }
-  if (!is_present(params$annotation_gff_file) || !file.exists(params$annotation_gff_file)) {
+  if (!is_present(params$target_annotations_path) || !file.exists(params$target_annotations_path)) {
     return(list(
       features = NULL,
       diagnostics = empty_annotation_diagnostics(
         "skipped",
-        paste("GFF file is missing or not configured:", params$annotation_gff_file)
+        paste("GFF file is missing or not configured:", params$target_annotations_path)
       )
     ))
   }
 
-  gff <- read_gff_table(params$annotation_gff_file)
+  gff <- read_gff_table(params$target_annotations_path)
   if (nrow(gff) == 0) {
     return(list(features = NULL, diagnostics = empty_annotation_diagnostics("skipped", "GFF contained no usable feature rows.")))
   }

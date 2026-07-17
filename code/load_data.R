@@ -163,8 +163,122 @@ parse_feature_field <- function(x) {
   unique(ids[nzchar(ids) & !ids %in% c(".", "*")])
 }
 
-is_unresolved_feature <- function(ids) {
-  grepl("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-", ids)
+split_gff_identifier_values <- function(x) {
+  if (length(x) == 0 || is.na(x) || !nzchar(x)) {
+    return(character())
+  }
+  values <- unlist(strsplit(x, ",", fixed = TRUE), use.names = FALSE)
+  values <- trimws(values)
+  unique(values[nzchar(values) & !values %in% c(".", "*")])
+}
+
+read_rnanue_annotation_ids <- function(gff_path) {
+  unavailable <- function(reason) {
+    list(ids = character(), available = FALSE, reason = reason)
+  }
+
+  if (!is_present(gff_path)) {
+    return(unavailable("annotations_file is missing or not configured"))
+  }
+  if (!file.exists(gff_path)) {
+    return(unavailable(paste("annotations_file does not exist:", gff_path)))
+  }
+
+  lines <- tryCatch(
+    {
+      connection <- if (grepl("\\.gz$", gff_path, ignore.case = TRUE)) {
+        gzfile(gff_path, open = "rt")
+      } else {
+        file(gff_path, open = "rt")
+      }
+      on.exit(close(connection), add = TRUE)
+      readLines(connection, warn = FALSE)
+    },
+    error = function(e) e
+  )
+  if (inherits(lines, "error")) {
+    return(unavailable(paste("annotations_file could not be read:", conditionMessage(lines))))
+  }
+
+  lines <- lines[nzchar(trimws(lines)) & !grepl("^#", lines)]
+  fields <- strsplit(lines, "\t", fixed = TRUE)
+  fields <- fields[lengths(fields) >= 9]
+  if (length(fields) == 0) {
+    return(unavailable("annotations_file contained no usable nine-column GFF rows"))
+  }
+
+  identifiers <- character()
+  for (field in fields) {
+    attributes <- unlist(strsplit(field[9], ";", fixed = TRUE), use.names = FALSE)
+    attributes <- trimws(attributes)
+    for (attribute in attributes) {
+      key_value <- strsplit(attribute, "=", fixed = TRUE)[[1]]
+      if (length(key_value) < 2) {
+        next
+      }
+      key <- trimws(key_value[1])
+      if (!key %in% c("ID", "Parent")) {
+        next
+      }
+      value <- paste(key_value[-1], collapse = "=")
+      value <- tryCatch(utils::URLdecode(value), error = function(e) value)
+      identifiers <- c(identifiers, split_gff_identifier_values(value))
+    }
+  }
+  identifiers <- unique(identifiers)
+  if (length(identifiers) == 0) {
+    return(unavailable("annotations_file contained no ID or Parent attributes"))
+  }
+
+  list(ids = identifiers, available = TRUE, reason = "")
+}
+
+parse_sample_feature_map <- function(x) {
+  if (length(x) == 0 || is.na(x) || x == "" || x == ".") {
+    return(list(by_sample = list(), all_ids = character()))
+  }
+
+  tokens <- unlist(strsplit(as.character(x), ";", fixed = TRUE), use.names = FALSE)
+  tokens <- trimws(tokens)
+  tokens <- tokens[nzchar(tokens)]
+  by_sample <- list()
+  all_ids <- character()
+
+  for (token in tokens) {
+    separator <- regexpr(":", token, fixed = TRUE)[1]
+    if (separator > 0) {
+      sample_id <- substr(token, 1, separator - 1)
+      id_text <- substr(token, separator + 1, nchar(token))
+    } else {
+      sample_id <- NA_character_
+      id_text <- token
+    }
+
+    ids <- unlist(strsplit(id_text, ",", fixed = TRUE), use.names = FALSE)
+    ids <- trimws(ids)
+    ids <- unique(ids[nzchar(ids) & !ids %in% c(".", "*")])
+    all_ids <- c(all_ids, ids)
+
+    if (!is.na(sample_id) && length(ids) > 0) {
+      by_sample[[sample_id]] <- unique(c(by_sample[[sample_id]], ids))
+    }
+  }
+
+  list(by_sample = by_sample, all_ids = unique(all_ids))
+}
+
+feature_ids_for_sample <- function(feature_map, sample_id, stable_feature_ids = character()) {
+  sample_ids <- feature_map$by_sample[[sample_id]]
+
+  if (length(sample_ids) > 0) {
+    return(sample_ids)
+  }
+
+  intersect(feature_map$all_ids, stable_feature_ids)
+}
+
+parse_feature_field_for_sample <- function(x, sample_id, stable_feature_ids = character()) {
+  feature_ids_for_sample(parse_sample_feature_map(x), sample_id, stable_feature_ids)
 }
 
 parse_cluster_tokens <- function(x) {
@@ -242,23 +356,23 @@ read_read_count_summaries <- function(sample_ids, detect_dir) {
   dplyr::bind_rows(rows)
 }
 
-read_contiguous_counts <- function(sample_ids, detect_dir) {
+read_interaction_transcript_counts <- function(sample_ids, analyze_dir) {
   counts <- list()
   for (sample_id in sample_ids) {
-    file_path <- find_sample_file(detect_dir, sample_id, "_contiguous_transcript_counts.tsv")
+    file_path <- find_sample_file(analyze_dir, sample_id, "_interaction_transcript_counts.tsv")
     if (is.na(file_path)) {
       counts[[sample_id]] <- NULL
       next
     }
-    contig <- readr::read_delim(
+    transcript_counts <- readr::read_delim(
       file_path,
       delim = "\t",
       col_names = c("feature_id", "count"),
       show_col_types = FALSE,
       progress = FALSE
     )
-    values <- as.numeric(contig$count)
-    names(values) <- as.character(contig$feature_id)
+    values <- as.numeric(transcript_counts$count)
+    names(values) <- as.character(transcript_counts$feature_id)
     counts[[sample_id]] <- values
   }
   counts
@@ -440,7 +554,7 @@ sum_feature_counts <- function(feature_ids, sample_counts) {
 }
 
 build_offset_matrices <- function(counts_model, bedpe, read_summaries,
-                                  contiguous_counts, params) {
+                                  interaction_transcript_counts, params) {
   sample_ids <- colnames(counts_model)
   pseudocount <- params$offset_pseudocount
   read_summaries <- read_summaries[match(sample_ids, read_summaries$sample_id), , drop = FALSE]
@@ -464,24 +578,42 @@ build_offset_matrices <- function(counts_model, bedpe, read_summaries,
   names(unresolved_arm1) <- rownames(counts_model)
   names(unresolved_arm2) <- rownames(counts_model)
 
-  if (isTRUE(params$pair_background)) {
+  stable_features <- if (isTRUE(params$pair_background)) {
+    read_rnanue_annotation_ids(params$annotations_path)
+  } else {
+    list(ids = character(), available = FALSE, reason = "pair background disabled by configuration")
+  }
+  pair_background_applied <- isTRUE(params$pair_background) && stable_features$available
+
+  if (isTRUE(params$pair_background) && !stable_features$available) {
+    warning(
+      "Pair-background normalization was requested but disabled: ",
+      stable_features$reason,
+      ". Exposure-only offsets will be used.",
+      call. = FALSE
+    )
+  }
+
+  if (pair_background_applied) {
     for (i in seq_len(nrow(counts_model))) {
       interaction_id <- rownames(counts_model)[i]
       bedpe_row <- bedpe[interaction_id, , drop = FALSE]
-      arm1 <- parse_feature_field(bedpe_row$arm1_features[1])
-      arm2 <- parse_feature_field(bedpe_row$arm2_features[1])
-      arm1_resolved <- arm1[!is_unresolved_feature(arm1)]
-      arm2_resolved <- arm2[!is_unresolved_feature(arm2)]
-      unresolved_arm1[i] <- length(arm1_resolved) == 0 && length(arm1) > 0
-      unresolved_arm2[i] <- length(arm2_resolved) == 0 && length(arm2) > 0
-
-      if (length(arm1_resolved) == 0 || length(arm2_resolved) == 0) {
-        next
-      }
-
-      multiplier <- if (length(intersect(arm1_resolved, arm2_resolved)) == 0) 2 else 1
+      arm1_feature_map <- parse_sample_feature_map(bedpe_row$arm1_features[1])
+      arm2_feature_map <- parse_sample_feature_map(bedpe_row$arm2_features[1])
       for (sample_id in sample_ids) {
-        sample_counts <- contiguous_counts[[sample_id]]
+        arm1 <- feature_ids_for_sample(arm1_feature_map, sample_id, stable_features$ids)
+        arm2 <- feature_ids_for_sample(arm2_feature_map, sample_id, stable_features$ids)
+        if (length(arm1) == 0) {
+          unresolved_arm1[i] <- TRUE
+        }
+        if (length(arm2) == 0) {
+          unresolved_arm2[i] <- TRUE
+        }
+        if (length(arm1) == 0 || length(arm2) == 0) {
+          next
+        }
+
+        sample_counts <- interaction_transcript_counts[[sample_id]]
         if (is.null(sample_counts) || length(sample_counts) == 0) {
           next
         }
@@ -489,8 +621,9 @@ build_offset_matrices <- function(counts_model, bedpe, read_summaries,
         if (!is.finite(total_bg) || total_bg <= 0) {
           next
         }
-        arm1_sum <- sum_feature_counts(arm1_resolved, sample_counts)
-        arm2_sum <- sum_feature_counts(arm2_resolved, sample_counts)
+        arm1_sum <- sum_feature_counts(arm1, sample_counts)
+        arm2_sum <- sum_feature_counts(arm2, sample_counts)
+        multiplier <- if (length(intersect(arm1, arm2)) == 0) 2 else 1
         pair_weight <- multiplier *
           ((arm1_sum + pseudocount) / (total_bg + pseudocount)) *
           ((arm2_sum + pseudocount) / (total_bg + pseudocount))
@@ -512,10 +645,20 @@ build_offset_matrices <- function(counts_model, bedpe, read_summaries,
     stringsAsFactors = FALSE
   )
 
+  normalization_setup_diagnostics <- data.frame(
+    annotations_file = as.character(params$annotations_path),
+    stable_feature_id_count = length(stable_features$ids),
+    pair_background_requested = isTRUE(params$pair_background),
+    pair_background_applied = pair_background_applied,
+    fallback_reason = if (pair_background_applied) "" else stable_features$reason,
+    stringsAsFactors = FALSE
+  )
+
   list(
     log_offset = log_offset,
     pair_background_available = pair_background_available,
     sample_exposure = exposure,
-    normalization_diagnostics = normalization_diagnostics
+    normalization_diagnostics = normalization_diagnostics,
+    normalization_setup_diagnostics = normalization_setup_diagnostics
   )
 }

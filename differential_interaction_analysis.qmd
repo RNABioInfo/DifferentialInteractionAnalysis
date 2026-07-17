@@ -45,7 +45,7 @@ params:
   annotation:
     value:
       enabled: true
-      gff_file: "/Users/christopherphd/Downloads/Syn_final_modified.gff"
+      target_annotations_overwrite: "/Users/christopherphd/Downloads/Syn_final_modified.gff"
       feature_types:
         - "gene"
         - "sRNA"
@@ -197,9 +197,7 @@ if (nrow(analysis$batch_balance) > 0) {
 
 # Sample-Level Quality Control
 
-QC plots show read depth, interaction library size, interaction yield, and split-read fraction by sample role. 
-`mapped_read_count` uses RNAnue `mapped_reads` when available, otherwise `splits + singletons`. 
-`interaction_library_sum` is the per-sample sum of the interaction-count matrix.
+QC plots show read depth, interaction library size, interaction yield, and split-read fraction by sample role. `mapped_read_count` uses RNAnue `mapped_reads` when available, otherwise `splits + singletons`. `interaction_library_sum` is the per-sample sum of the interaction-count matrix.
 
 ```{r}
 #| echo: false
@@ -265,9 +263,7 @@ Pairwise Spearman correlations on log2 offset-normalized counts.
 print(plot_sample_correlation_heatmap(analysis))
 ```
 
-Paired interaction background is available when both interaction arms map to transcript-count features in a sample. 
-Currently this is not implemented for supplementary features.
-A fraction of `1` means all model samples used the pair-background offset for that interaction.
+Paired interaction background is built from analyze-stage `*_interaction_transcript_counts.tsv` files. The exact GFF supplied through `annotations_file` identifies stable RNAnue feature IDs that may be shared when a sample-specific BEDPE entry is absent; IDs outside that GFF remain sample-specific. A fraction of `1` means all model samples used the pair-background offset for that interaction.
 
 The plots summarize pair-background availability and final log-offset variation.
 
@@ -278,7 +274,12 @@ The plots summarize pair-background availability and final log-offset variation.
 plot_offset_diagnostics(analysis)
 ```
 
-Normalization diagnostics output: `normalization_diagnostics.tsv`.
+Normalization diagnostics outputs: `normalization_diagnostics.tsv` and `normalization_setup_diagnostics.tsv`.
+
+```{r}
+#| echo: false
+knitr::kable(analysis$normalization_setup_diagnostics)
+```
 
 # Differential Enrichment
 
@@ -347,8 +348,7 @@ if (!is.null(analysis$concordance)) {
 
 # High-Confidence Candidates
 
-High-confidence candidates pass all configured cutoffs: edgeR, DESeq2, RNAnue support.
-Candidate outputs include a full TSV, paired BEDPE, and region-level BED.
+High-confidence candidates pass all configured cutoffs: edgeR, DESeq2, RNAnue support. Candidate outputs include a full TSV, paired BEDPE, and region-level BED.
 
 ```{r}
 #| echo: false

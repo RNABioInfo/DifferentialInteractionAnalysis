@@ -214,7 +214,7 @@ make_analysis <- function(params) {
     if (!role %in% names(role_counts) || role_counts[[role]] < 2) {
       stop(
         "Primary contrast role '", role, "' has fewer than two model samples. ",
-        "Replicated negative-binomial inference needs biological replication.",
+        "Differential analysis needs biological replicates",
         call. = FALSE
       )
     }
@@ -261,13 +261,22 @@ make_analysis <- function(params) {
 
   all_metadata_sample_ids <- metadata$sample_id
   read_summaries <- read_read_count_summaries(all_metadata_sample_ids, params$detect_dir)
-  contiguous_counts <- read_contiguous_counts(model_metadata$sample_id, params$detect_dir)
+  interaction_transcript_counts <- read_interaction_transcript_counts(
+    model_metadata$sample_id,
+    params$analyze_dir
+  )
   native_interactions <- read_native_interactions(all_metadata_sample_ids, params$analyze_dir)
   native_metrics <- build_rnanue_metric_summary(bedpe, native_interactions)
   native_padj_by_role <- build_rnanue_padj_by_role(bedpe, native_interactions, metadata, params)
   sample_qc <- build_sample_qc(metadata, counts_all, read_summaries)
   no_ligation_qc <- build_no_ligation_qc(sample_qc, params)
-  offsets <- build_offset_matrices(counts_model, bedpe, read_summaries, contiguous_counts, params)
+  offsets <- build_offset_matrices(
+    counts_model,
+    bedpe,
+    read_summaries,
+    interaction_transcript_counts,
+    params
+  )
 
   structure(
     list(
@@ -280,7 +289,7 @@ make_analysis <- function(params) {
       sample_qc = sample_qc,
       no_ligation_qc = no_ligation_qc,
       read_summaries = read_summaries,
-      contiguous_counts = contiguous_counts,
+      interaction_transcript_counts = interaction_transcript_counts,
       native_interactions = native_interactions,
       native_metrics = native_metrics,
       native_padj_by_role = native_padj_by_role,
@@ -288,6 +297,7 @@ make_analysis <- function(params) {
       pair_background_available = offsets$pair_background_available,
       sample_exposure = offsets$sample_exposure,
       normalization_diagnostics = offsets$normalization_diagnostics,
+      normalization_setup_diagnostics = offsets$normalization_setup_diagnostics,
       design_formula = design_info$design_formula,
       design = design_info$design,
       contrast_coef = design_info$contrast_coef,
@@ -726,6 +736,10 @@ write_interaction_outputs <- function(analysis) {
   dir.create(analysis$params$out_dir, showWarnings = FALSE, recursive = TRUE)
   readr::write_tsv(analysis$sample_qc, file.path(analysis$params$out_dir, "sample_qc.tsv"))
   readr::write_tsv(analysis$normalization_diagnostics, file.path(analysis$params$out_dir, "normalization_diagnostics.tsv"))
+  readr::write_tsv(
+    analysis$normalization_setup_diagnostics,
+    file.path(analysis$params$out_dir, "normalization_setup_diagnostics.tsv")
+  )
   readr::write_tsv(analysis$design_diagnostics, file.path(analysis$params$out_dir, "design_diagnostics.tsv"))
   readr::write_tsv(analysis$batch_balance, file.path(analysis$params$out_dir, "batch_balance.tsv"))
   readr::write_tsv(analysis$analysis_warnings, file.path(analysis$params$out_dir, "analysis_warnings.tsv"))

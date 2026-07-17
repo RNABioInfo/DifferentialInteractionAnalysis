@@ -2,7 +2,7 @@
 #
 # Package installation is intentionally kept out of render/preview. Install the
 # conda environment from environment.yml, then render the document from that
-# environment. This keeps Quarto from silently compiling packages during setup.
+# environment.
 message("Loading libraries")
 
 attached_packages <- c(

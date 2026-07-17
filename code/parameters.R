@@ -106,6 +106,16 @@ reject_retired_input_params <- function(params) {
       call. = FALSE
     )
   }
+
+  annotation <- params$annotation %||% list()
+  if ("gff_file" %in% names(annotation)) {
+    stop(
+      "Retired parameter annotation.gff_file is no longer supported. ",
+      "Use annotation.target_annotations_overwrite for an optional final annotation override; ",
+      "annotations_file must point to the exact GFF used by RNAnue.",
+      call. = FALSE
+    )
+  }
 }
 
 AnalysisParameters <- function(params) {
@@ -138,7 +148,8 @@ AnalysisParameters <- function(params) {
   batch_correction <- params$batch_correction %||% list()
   annotation <- params$annotation %||% list()
   legacy_feature_ids <- params$feature_ids %||% ""
-  annotation_gff_file <- annotation$gff_file %||% params$annotations_file %||% NA_character_
+  target_annotations_path <-
+    annotation$target_annotations_overwrite %||% params$annotations_file %||% NA_character_
   annotation_strand_policy <- tolower(annotation$strand_policy %||% "")
   if (!nzchar(annotation_strand_policy)) {
     annotation_strand_policy <- if (!is.null(annotation$same_strand)) {
@@ -193,7 +204,7 @@ AnalysisParameters <- function(params) {
       DESeq2_count_handling = count_handling$DESeq2 %||% "round",
       high_confidence_rnanue_padj_max = as.numeric(high_confidence$rnanue_padj_max %||% 0.1),
       annotation_enabled = isTRUE(annotation$enabled %||% TRUE),
-      annotation_gff_file = annotation_gff_file,
+      target_annotations_path = target_annotations_path,
       annotation_feature_types = as_character_vector(
         annotation$feature_types,
         c("gene", "sRNA", "tRNA", "rRNA", "ncRNA", "transcript", "TU", "CDS", "mobile_genetic_element")
